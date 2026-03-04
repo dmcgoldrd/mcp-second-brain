@@ -31,8 +31,12 @@ EMBEDDING_DIMENSIONS = int(os.environ.get("EMBEDDING_DIMENSIONS", "1536"))
 # Server
 HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT", "8080"))
-ENVIRONMENT = os.environ.get("ENVIRONMENT", "development")
-BASE_URL = os.environ.get("BASE_URL", "http://localhost:8080")
+ENVIRONMENT = os.environ.get("RAILWAY_ENVIRONMENT", os.environ.get("ENVIRONMENT", "development"))
+
+# Derive BASE_URL from Railway's auto-injected domain, or fall back to explicit/local
+_railway_domain = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
+_default_base = f"https://{_railway_domain}" if _railway_domain else "http://localhost:8080"
+BASE_URL = os.environ.get("BASE_URL", _default_base)
 
 # Limits
 FREE_MEMORY_LIMIT = int(os.environ.get("FREE_MEMORY_LIMIT", "1000"))
