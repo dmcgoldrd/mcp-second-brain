@@ -15,9 +15,9 @@ from typing import Annotated
 
 from fastmcp import FastMCP
 from fastmcp.server.auth import AccessToken
+from fastmcp.server.auth.providers.supabase import SupabaseProvider
 from fastmcp.server.dependencies import CurrentAccessToken, get_http_headers
 
-from src.auth.provider import MCPBrainAuthProvider
 from src.config import (
     BASE_URL,
     MAX_BANK_NAME_LENGTH,
@@ -42,7 +42,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("mcp-brain")
 
 # Create the auth provider — validates Supabase JWTs and serves OAuth metadata
-auth_provider = MCPBrainAuthProvider(
+# Uses base SupabaseProvider which forwards Supabase's OAuth AS metadata
+# (including registration_endpoint for Dynamic Client Registration)
+auth_provider = SupabaseProvider(
     project_url=SUPABASE_URL,
     base_url=BASE_URL,
     algorithm="ES256",

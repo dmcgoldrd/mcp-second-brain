@@ -2,15 +2,19 @@ import { supabase } from './lib/supabase'
 import { renderLogin } from './pages/login'
 import { renderSignup } from './pages/signup'
 import { renderDashboard, getClientConfig, getClientSteps, clientHasJsonConfig } from './pages/dashboard'
+import { renderConsent, initConsent } from './pages/consent'
 import type { ConnectClient } from './pages/dashboard'
 import './style.css'
 
-type Route = 'login' | 'signup' | 'dashboard'
+type Route = 'login' | 'signup' | 'dashboard' | 'consent'
 
 let currentUser: { id: string; email: string } | null = null
 let activeConnectClient: ConnectClient = 'claude-code'
 
 function getRoute(): Route {
+  // OAuth consent uses real path routing (Supabase redirects to /oauth/consent)
+  if (window.location.pathname === '/oauth/consent') return 'consent'
+
   const hash = window.location.hash.replace('#/', '').replace('#', '')
   if (hash === 'login') return 'login'
   if (hash === 'signup') return 'signup'
@@ -54,6 +58,10 @@ function render(): void {
       loadDashboardData()
       bindDashboardEvents()
       bindConnectSection()
+      break
+    case 'consent':
+      app.innerHTML = renderConsent()
+      initConsent()
       break
   }
 }
@@ -275,6 +283,15 @@ function bindConnectSection(): void {
 supabase.auth.onAuthStateChange((_event, session) => {
   if (session?.user) {
     currentUser = { id: session.user.id, email: session.user.email ?? '' }
+
+    // Check for OAuth returnTo (consent page redirect after login)
+    const hashParams = new URLSearchParams(window.location.hash.split('?')[1] || '')
+    const returnTo = hashParams.get('returnTo')
+    if (returnTo && returnTo.startsWith('/oauth/')) {
+      // Redirect back to consent page with authorization_id preserved
+      window.location.href = returnTo
+      return
+    }
   } else {
     currentUser = null
   }

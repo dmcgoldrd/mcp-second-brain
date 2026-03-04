@@ -10,4 +10,6 @@ export default defineConfig({
     port: 3000,
     open: true,
   },
+  // SPA fallback: serve index.html for /oauth/consent (OAuth redirect path)
+  appType: 'spa',
 })

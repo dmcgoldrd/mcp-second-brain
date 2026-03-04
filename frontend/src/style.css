@@ -321,3 +321,85 @@ input:focus { border-color: var(--accent); }
 .connect-note strong {
   color: var(--text);
 }
+
+/* OAuth consent page */
+.auth-container {
+  display: flex;
+  justify-content: center;
+  padding-top: 4rem;
+}
+
+.auth-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2rem;
+  width: 100%;
+  max-width: 420px;
+}
+
+.auth-header {
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+
+.auth-header h1 { font-size: 1.5rem; }
+.auth-header p { color: var(--text-muted); font-size: 0.9rem; margin-top: 0.25rem; }
+
+.consent-client {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.consent-client-logo {
+  border-radius: var(--radius);
+}
+
+.consent-client strong { font-size: 1.1rem; }
+.consent-client-uri { color: var(--text-muted); font-size: 0.8rem; }
+
+.consent-scopes {
+  list-style: none;
+  padding: 0;
+  margin: 0.75rem 0 1.5rem;
+}
+
+.consent-scopes li {
+  padding: 0.375rem 0.75rem;
+  margin-bottom: 0.375rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  font-family: monospace;
+}
+
+.consent-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.consent-actions .btn { flex: 1; }
+
+.btn-secondary {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.btn-secondary:hover { border-color: var(--text-muted); background: var(--surface-hover); }
+
+.consent-error {
+  text-align: center;
+  color: var(--danger);
+}
+
+.consent-error .btn { margin-top: 1rem; }
+
+.loading {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 2rem 0;
+}

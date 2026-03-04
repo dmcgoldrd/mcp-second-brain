@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 
@@ -63,7 +64,7 @@ async def create_memory(
             bank_uuid,
             content,
             embedding_array,
-            metadata or {},
+            json.dumps(metadata or {}),
             memory_type,
             tags or [],
             source,
