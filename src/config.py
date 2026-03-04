@@ -10,7 +10,7 @@ load_dotenv()
 # Supabase
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_ANON_KEY = os.environ["SUPABASE_ANON_KEY"]
-SUPABASE_SERVICE_ROLE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 SUPABASE_DB_URL = os.environ["SUPABASE_DB_URL"]
 SUPABASE_JWKS_URL = os.environ.get(
     "SUPABASE_JWKS_URL",
@@ -31,3 +31,4 @@ ENVIRONMENT = os.environ.get("ENVIRONMENT", "development")
 FREE_MEMORY_LIMIT = int(os.environ.get("FREE_MEMORY_LIMIT", "1000"))
 FREE_RETRIEVAL_LIMIT = int(os.environ.get("FREE_RETRIEVAL_LIMIT", "500"))
 PAID_MEMORY_LIMIT = int(os.environ.get("PAID_MEMORY_LIMIT", "50000"))
+MAX_CONTENT_LENGTH = int(os.environ.get("MAX_CONTENT_LENGTH", "50000"))  # ~50KB

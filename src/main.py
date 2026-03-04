@@ -1,7 +1,5 @@
 """Entry point for the MCP Brain server."""
 
-import uvicorn
-
 from src.config import HOST, PORT
 from src.server import mcp
 

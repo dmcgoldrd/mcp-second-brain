@@ -4,13 +4,17 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.config import FREE_MEMORY_LIMIT, PAID_MEMORY_LIMIT
 from src.db import memories as db
+from src.db.profiles import get_memory_count, is_subscription_active
 from src.embeddings import generate_embedding
 from src.metadata import classify_memory_type, extract_metadata
+from src.ratelimit import embedding_limiter
 
 
 async def create_memory(
     user_id: str,
+    bank_id: str,
     content: str,
     memory_type: str | None = None,
     tags: list[str] | None = None,
@@ -23,6 +27,27 @@ async def create_memory(
     and basic metadata is extracted via heuristics. The AI client can
     provide richer metadata (entities, topics, sentiment) directly.
     """
+    # Check subscription limits BEFORE calling OpenAI
+    count = await get_memory_count(user_id)
+    is_paid = await is_subscription_active(user_id)
+    limit = PAID_MEMORY_LIMIT if is_paid else FREE_MEMORY_LIMIT
+
+    if count >= limit:
+        return {
+            "status": "error",
+            "error": "memory_limit_reached",
+            "message": f"You have {count}/{limit} memories. "
+            + ("Upgrade your plan for more." if not is_paid else "Limit reached."),
+        }
+
+    # Embedding rate limit
+    if not embedding_limiter.check(user_id):
+        return {
+            "status": "error",
+            "error": "rate_limited",
+            "message": "Embedding rate limit exceeded. Please slow down.",
+        }
+
     # Generate embedding
     embedding = await generate_embedding(content)
 
@@ -38,6 +63,7 @@ async def create_memory(
     # Store in database
     result = await db.create_memory(
         user_id=user_id,
+        bank_id=bank_id,
         content=content,
         embedding=embedding,
         metadata=auto_metadata,
@@ -56,6 +82,7 @@ async def create_memory(
 
 async def search_memories(
     user_id: str,
+    bank_id: str,
     query: str,
     limit: int = 10,
 ) -> list[dict[str, Any]]:
@@ -64,10 +91,15 @@ async def search_memories(
     The query is embedded and used for both vector similarity search
     and full-text search. Results are ranked using Reciprocal Ranked Fusion.
     """
+    # Embedding rate limit
+    if not embedding_limiter.check(user_id):
+        return []
+
     query_embedding = await generate_embedding(query)
 
     results = await db.search_memories(
         user_id=user_id,
+        bank_id=bank_id,
         query_embedding=query_embedding,
         query_text=query,
         limit=limit,
@@ -89,6 +121,7 @@ async def search_memories(
 
 async def list_memories(
     user_id: str,
+    bank_id: str,
     limit: int = 20,
     offset: int = 0,
     memory_type: str | None = None,
@@ -96,6 +129,7 @@ async def list_memories(
     """List recent memories, optionally filtered by type."""
     results = await db.list_memories(
         user_id=user_id,
+        bank_id=bank_id,
         limit=limit,
         offset=offset,
         memory_type=memory_type,
@@ -114,18 +148,18 @@ async def list_memories(
     ]
 
 
-async def delete_memory(user_id: str, memory_id: str) -> dict[str, Any]:
+async def delete_memory(user_id: str, bank_id: str, memory_id: str) -> dict[str, Any]:
     """Delete a specific memory by ID."""
-    deleted = await db.delete_memory(user_id=user_id, memory_id=memory_id)
+    deleted = await db.delete_memory(user_id=user_id, bank_id=bank_id, memory_id=memory_id)
     return {
         "status": "deleted" if deleted else "not_found",
         "memory_id": memory_id,
     }
 
 
-async def get_stats(user_id: str) -> dict[str, Any]:
+async def get_stats(user_id: str, bank_id: str) -> dict[str, Any]:
     """Get memory statistics for the current user."""
-    stats = await db.get_memory_stats(user_id=user_id)
+    stats = await db.get_memory_stats(user_id=user_id, bank_id=bank_id)
     return {
         "total_memories": stats.get("total_memories", 0),
         "type_breakdown": stats.get("type_breakdown", {}),

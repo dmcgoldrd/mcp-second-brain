@@ -11,14 +11,15 @@ dependencies = [
     "pyjwt[crypto]>=2.9.0",
     "httpx>=0.28.0",
     "python-dotenv>=1.0.0",
-    "supabase>=2.0.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
+    "pytest-cov>=6.0.0",
     "ruff>=0.8.0",
+    "pre-commit>=4.0.0",
 ]
 
 [tool.ruff]
@@ -26,7 +27,18 @@ target-version = "py312"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "W"]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "E501"]
+"src/server.py" = ["B008"]  # CurrentAccessToken() is a FastMCP dependency marker, not a mutable default
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "--cov=src --cov-report=term-missing --cov-report=html"
+
+[tool.coverage.report]
+exclude_lines = [
+    "if __name__",
+]

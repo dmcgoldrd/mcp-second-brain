@@ -65,10 +65,7 @@ def classify_memory_type(content: str) -> str:
         return "decision"
     if any(kw in lower for kw in ["prefer", "always", "never", "i like", "i hate", "i want"]):
         return "preference"
-    if any(
-        kw in lower
-        for kw in ["met with", "spoke to", "talked to", "said that", "person:"]
-    ):
+    if any(kw in lower for kw in ["met with", "spoke to", "talked to", "said that", "person:"]):
         return "person_note"
 
     return "observation"

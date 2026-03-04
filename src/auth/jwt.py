@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import httpx
 import jwt
 from jwt import PyJWKClient
 
