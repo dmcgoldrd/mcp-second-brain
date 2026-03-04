@@ -88,29 +88,51 @@ async def create_bank(user_id: str, name: str, slug: str, max_banks: int = 10) -
     Args:
         max_banks: Maximum number of banks allowed for this user.
                    Caller resolves this based on subscription status.
+
+    Uses a transaction with row lock to prevent TOCTOU race (N-03).
+    The DB also has a trigger (migration 004) as defense-in-depth (N-02).
     """
     try:
         user_uuid = uuid.UUID(user_id)
     except ValueError:
         return {"error": "Invalid user ID format"}
 
-    # F-09: Enforce bank creation limit
-    current_count = await count_user_banks(user_id)
-    if current_count >= max_banks:
-        return {"error": f"Bank limit reached ({max_banks} banks maximum)"}
-
     pool = await get_pool()
     bank_uuid = uuid.uuid4()
 
-    row = await pool.fetchrow(
-        """
-        INSERT INTO banks (id, user_id, name, slug, is_default)
-        VALUES ($1, $2::uuid, $3, $4, false)
-        RETURNING id, name, slug, is_default, created_at
-        """,
-        bank_uuid,
-        user_uuid,
-        name,
-        slug,
-    )
+    async with pool.acquire() as conn, conn.transaction():
+        # N-03: Atomic limit check — lock the user's profile row
+        row = await conn.fetchrow(
+            "SELECT id FROM profiles WHERE id = $1::uuid FOR UPDATE",
+            user_uuid,
+        )
+
+        # Count banks while holding the lock
+        count_row = await conn.fetchrow(
+            "SELECT COUNT(*) AS cnt FROM banks WHERE user_id = $1::uuid",
+            user_uuid,
+        )
+        current_count = count_row["cnt"] if count_row else 0
+
+        if current_count >= max_banks:
+            return {"error": f"Bank limit reached ({max_banks} banks maximum)"}
+
+        try:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO banks (id, user_id, name, slug, is_default)
+                VALUES ($1, $2::uuid, $3, $4, false)
+                RETURNING id, name, slug, is_default, created_at
+                """,
+                bank_uuid,
+                user_uuid,
+                name,
+                slug,
+            )
+        except Exception as e:
+            err_msg = str(e)
+            if "unique" in err_msg.lower() or "duplicate" in err_msg.lower():
+                return {"error": "Bank slug already exists"}
+            raise
+
     return dict(row) if row else {}

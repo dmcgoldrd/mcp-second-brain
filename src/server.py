@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Annotated
 
 from fastmcp import FastMCP
@@ -19,10 +20,13 @@ from fastmcp.server.dependencies import CurrentAccessToken, get_http_headers
 from src.auth.provider import MCPBrainAuthProvider
 from src.config import (
     BASE_URL,
+    MAX_BANK_NAME_LENGTH,
+    MAX_BANK_SLUG_LENGTH,
     MAX_BANKS_FREE,
     MAX_BANKS_PAID,
     MAX_CONTENT_LENGTH,
     MAX_METADATA_LENGTH,
+    MAX_QUERY_LENGTH,
     MAX_TAG_LENGTH,
     MAX_TAGS,
     SUPABASE_URL,
@@ -125,6 +129,16 @@ async def create_memory(
     """
     auth = await _resolve_auth(token)
 
+    # N-08: Reject empty content
+    if not content or not content.strip():
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "empty_content",
+                "message": "Content cannot be empty.",
+            }
+        )
+
     # F-11: Check content length in bytes, not characters
     if len(content.encode("utf-8")) > MAX_CONTENT_LENGTH:
         return json.dumps(
@@ -171,12 +185,12 @@ async def create_memory(
     # F-08: Validate metadata size
     parsed_metadata = None
     if metadata:
-        if len(metadata) > MAX_METADATA_LENGTH:
+        if len(metadata.encode("utf-8")) > MAX_METADATA_LENGTH:
             return json.dumps(
                 {
                     "status": "error",
                     "error": "metadata_too_large",
-                    "message": f"Metadata exceeds {MAX_METADATA_LENGTH} character limit.",
+                    "message": f"Metadata exceeds {MAX_METADATA_LENGTH} byte limit.",
                 }
             )
         try:
@@ -216,6 +230,17 @@ async def search_memories(
     Returns the most relevant memories sorted by relevance score.
     """
     auth = await _resolve_auth(token)
+
+    # N-05: Validate query length
+    if len(query.encode("utf-8")) > MAX_QUERY_LENGTH:
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "query_too_long",
+                "message": f"Query exceeds {MAX_QUERY_LENGTH} byte limit.",
+            }
+        )
+
     limit = max(1, min(50, limit))
     results = await memory_tools.search_memories(
         user_id=auth["user_id"],
@@ -338,6 +363,39 @@ async def create_bank(
     for different contexts (e.g., 'work', 'personal', 'research').
     """
     auth = await _resolve_auth(token)
+
+    # N-04: Validate bank name and slug
+    name = name.strip()
+    slug = slug.strip().lower()
+    if not name:
+        return json.dumps(
+            {"status": "error", "error": "invalid_name", "message": "Bank name is required."}
+        )
+    if len(name) > MAX_BANK_NAME_LENGTH:
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "name_too_long",
+                "message": f"Bank name exceeds {MAX_BANK_NAME_LENGTH} character limit.",
+            }
+        )
+    if not slug or not re.match(r"^[a-z0-9][a-z0-9-]*$", slug):
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "invalid_slug",
+                "message": "Slug must be lowercase alphanumeric with hyphens.",
+            }
+        )
+    if len(slug) > MAX_BANK_SLUG_LENGTH:
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "slug_too_long",
+                "message": f"Slug exceeds {MAX_BANK_SLUG_LENGTH} character limit.",
+            }
+        )
+
     # F-09: Resolve bank limit based on subscription
     is_paid = await is_subscription_active(auth["user_id"])
     max_banks = MAX_BANKS_PAID if is_paid else MAX_BANKS_FREE

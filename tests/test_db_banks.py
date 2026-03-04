@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from tests.conftest import TEST_USER_ID
 
@@ -13,6 +13,31 @@ VALID_USER_ID = TEST_USER_ID
 
 def _patch_pool(mock_pool):
     return patch("src.db.banks.get_pool", new_callable=AsyncMock, return_value=mock_pool)
+
+
+class _AsyncCtx:
+    """Minimal async context manager wrapper for mocks."""
+
+    def __init__(self, value):
+        self._value = value
+
+    async def __aenter__(self):
+        return self._value
+
+    async def __aexit__(self, *args):
+        return False
+
+
+def _make_transactional_pool(fetchrow_side_effect=None):
+    """Create a mock pool for pool.acquire() → conn.transaction() → conn.fetchrow()."""
+    conn = AsyncMock()
+    conn.fetchrow = AsyncMock(side_effect=fetchrow_side_effect)
+    conn.transaction = MagicMock(return_value=_AsyncCtx(None))
+
+    pool = MagicMock()
+    pool.acquire = MagicMock(return_value=_AsyncCtx(conn))
+
+    return pool, conn
 
 
 # ===== get_user_banks =====
@@ -160,11 +185,12 @@ class TestCreateBank:
             "is_default": False,
             "created_at": datetime.utcnow(),
         }
-        mock_pool = AsyncMock()
-        # First fetchrow = count_user_banks (returns count=0), second = INSERT RETURNING
-        mock_pool.fetchrow = AsyncMock(side_effect=[{"cnt": 0}, fake_row])
+        # Calls inside transaction: 1) SELECT profile FOR UPDATE, 2) COUNT banks, 3) INSERT
+        pool, _conn = _make_transactional_pool(
+            fetchrow_side_effect=[{"id": VALID_USER_ID}, {"cnt": 0}, fake_row]
+        )
 
-        with _patch_pool(mock_pool):
+        with _patch_pool(pool):
             result = await create_bank(VALID_USER_ID, "Research", "research")
 
         assert result["name"] == "Research"
@@ -180,23 +206,26 @@ class TestCreateBank:
     async def test_returns_empty_when_no_row(self):
         from src.db.banks import create_bank
 
-        mock_pool = AsyncMock()
-        # First fetchrow = count (0), second = INSERT returns None
-        mock_pool.fetchrow = AsyncMock(side_effect=[{"cnt": 0}, None])
+        # profile exists, count=0, INSERT returns None
+        pool, _conn = _make_transactional_pool(
+            fetchrow_side_effect=[{"id": VALID_USER_ID}, {"cnt": 0}, None]
+        )
 
-        with _patch_pool(mock_pool):
+        with _patch_pool(pool):
             result = await create_bank(VALID_USER_ID, "Test", "test")
 
         assert result == {}
 
     async def test_rejects_when_bank_limit_reached(self):
-        """F-09: Bank creation limit enforcement."""
+        """N-03: Atomic bank creation limit enforcement."""
         from src.db.banks import create_bank
 
-        mock_pool = AsyncMock()
-        mock_pool.fetchrow = AsyncMock(return_value={"cnt": 10})
+        # profile locked, count=10 → should reject
+        pool, _conn = _make_transactional_pool(
+            fetchrow_side_effect=[{"id": VALID_USER_ID}, {"cnt": 10}]
+        )
 
-        with _patch_pool(mock_pool):
+        with _patch_pool(pool):
             result = await create_bank(VALID_USER_ID, "Test", "test", max_banks=10)
 
         assert "error" in result

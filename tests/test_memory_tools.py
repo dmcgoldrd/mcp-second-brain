@@ -14,8 +14,8 @@ VALID_BANK_ID = TEST_BANK_ID
 VALID_MEMORY_ID = str(uuid.uuid4())
 
 
-def _enter_mock_deps(stack: ExitStack) -> None:
-    """Enter rate limiter and subscription mocks into an ExitStack."""
+def _enter_mock_deps(stack: ExitStack, memory_count: int = 0) -> None:
+    """Enter rate limiter, subscription, and memory count mocks into an ExitStack."""
     mock_limiter = MagicMock()
     mock_limiter.check.return_value = True
     stack.enter_context(patch("src.tools.memory_tools.embedding_limiter", mock_limiter))
@@ -24,6 +24,14 @@ def _enter_mock_deps(stack: ExitStack) -> None:
             "src.tools.memory_tools.is_subscription_active",
             new_callable=AsyncMock,
             return_value=False,
+        )
+    )
+    # N-06: Pre-check calls get_memory_count before embedding
+    stack.enter_context(
+        patch(
+            "src.tools.memory_tools.get_memory_count",
+            new_callable=AsyncMock,
+            return_value=memory_count,
         )
     )
 
@@ -191,15 +199,30 @@ class TestCreateMemory:
 
         assert result["memory_id"] == str(mem_id)
 
-    async def test_memory_limit_reached(self):
-        """F-05: Limit check now happens atomically in db.create_memory."""
+    async def test_memory_limit_reached_precheck(self):
+        """N-06: Pre-check catches limit before embedding generation."""
         from src.tools.memory_tools import create_memory
 
-        # db.create_memory returns limit error when count >= limit
+        with ExitStack() as stack:
+            # Pre-check returns count=1000, limit=1000 → rejects before embedding
+            _enter_mock_deps(stack, memory_count=1000)
+
+            result = await create_memory(
+                user_id=VALID_USER_ID, bank_id=VALID_BANK_ID, content="test"
+            )
+
+        assert result["status"] == "error"
+        assert result["error"] == "memory_limit_reached"
+
+    async def test_memory_limit_reached_atomic(self):
+        """F-05: Atomic DB check catches race condition even if pre-check passes."""
+        from src.tools.memory_tools import create_memory
+
+        # Pre-check passes (count=999 < 1000), but DB atomic check fails
         db_limit_error = {"error": "memory_limit_reached", "count": 1000, "limit": 1000}
 
         with ExitStack() as stack:
-            _enter_mock_deps(stack)
+            _enter_mock_deps(stack, memory_count=999)
             stack.enter_context(
                 patch(
                     "src.tools.memory_tools.generate_embedding",
@@ -234,6 +257,11 @@ class TestCreateMemory:
                 "src.tools.memory_tools.is_subscription_active",
                 new_callable=AsyncMock,
                 return_value=False,
+            ),
+            patch(
+                "src.tools.memory_tools.get_memory_count",
+                new_callable=AsyncMock,
+                return_value=0,
             ),
         ):
             result = await create_memory(

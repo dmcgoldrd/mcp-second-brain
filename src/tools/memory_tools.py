@@ -6,7 +6,7 @@ from typing import Any
 
 from src.config import FREE_MEMORY_LIMIT, PAID_MEMORY_LIMIT
 from src.db import memories as db
-from src.db.profiles import is_subscription_active
+from src.db.profiles import get_memory_count, is_subscription_active
 from src.embeddings import generate_embedding
 from src.metadata import classify_memory_type, extract_metadata
 from src.ratelimit import embedding_limiter
@@ -30,6 +30,17 @@ async def create_memory(
     # Resolve memory limit for atomic DB check (F-05)
     is_paid = await is_subscription_active(user_id)
     memory_limit = PAID_MEMORY_LIMIT if is_paid else FREE_MEMORY_LIMIT
+
+    # N-06: Pre-check count BEFORE embedding to avoid wasting OpenAI API costs.
+    # This is a non-atomic preliminary check; the atomic check is in db.create_memory.
+    count = await get_memory_count(user_id)
+    if count >= memory_limit:
+        return {
+            "status": "error",
+            "error": "memory_limit_reached",
+            "message": f"You have {count}/{memory_limit} memories. "
+            + ("Upgrade your plan for more." if not is_paid else "Limit reached."),
+        }
 
     # Embedding rate limit
     if not embedding_limiter.check(user_id):

@@ -56,3 +56,6 @@ VALID_MEMORY_TYPES = {
 VALID_SOURCES = {"mcp", "slack", "manual", "import"}
 MAX_TAGS = 20
 MAX_TAG_LENGTH = 100
+MAX_BANK_NAME_LENGTH = 100
+MAX_BANK_SLUG_LENGTH = 50
+MAX_QUERY_LENGTH = 10000  # ~10KB search query limit

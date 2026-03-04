@@ -563,8 +563,8 @@ No minimum content length. An empty string triggers an OpenAI embedding API call
 | ISC-5 | source validated | **PASS** |
 | ISC-6 | tags validated | **PASS** |
 | ISC-7 | offset validated non-negative | **PASS** |
-| ISC-8 | bank slug validated | **PARTIAL** — parameterized, but no format/length validation (N-04) |
-| ISC-9 | Error messages don't leak | **PARTIAL** — fixed in server.py/provider.py, still leaks in middleware.py (N-01) |
+| ISC-8 | bank slug validated | **PASS** — format + length validated (N-04 fixed) |
+| ISC-9 | Error messages don't leak | **PASS** — middleware.py deleted (N-01 fixed) |
 | ISC-10 | OIDC not SSRF-exploitable | **PASS** |
 | ISC-11 | Rate limiter not exhaustible | **PASS** |
 | ISC-12 | No XSS vectors | **PASS** |
@@ -573,16 +573,31 @@ No minimum content length. An empty string triggers an OpenAI embedding API call
 | ISC-15 | base_url not spoofable | **PASS** |
 | ISC-16 | Exceptions not exposed | **PASS** |
 | ISC-17 | No TOCTOU in memory limit check | **PASS** |
-| ISC-18 | Metadata depth/size bounded | **PASS** (char-based, see N-07) |
+| ISC-18 | Metadata depth/size bounded | **PASS** — byte-based (N-07 fixed) |
 | ISC-19 | Content length uses bytes | **PASS** |
-| ISC-20 | Bank creation bounded | **PARTIAL** — MCP path only, frontend/API bypass (N-02) |
-| ISC-21 | No TOCTOU in bank limit check | **FAIL** — same race as F-05 (N-03) |
-| ISC-22 | Bank name/slug length bounded | **FAIL** — no validation (N-04) |
-| ISC-23 | Search query length bounded | **FAIL** — no validation (N-05) |
-| ISC-24 | No embedding cost burn at limit | **FAIL** — embedding before limit check (N-06) |
-| ISC-25 | Content has minimum length | **FAIL** — empty string accepted (N-08) |
-| ISC-26 | No dead auth code with wrong algorithms | **FAIL** — jwt.py RS256 vs ES256 (N-09) |
+| ISC-20 | Bank creation bounded | **PASS** — DB trigger + app check (N-02 fixed) |
+| ISC-21 | No TOCTOU in bank limit check | **PASS** — FOR UPDATE in transaction (N-03 fixed) |
+| ISC-22 | Bank name/slug length bounded | **PASS** — validated (N-04 fixed) |
+| ISC-23 | Search query length bounded | **PASS** — 10KB limit (N-05 fixed) |
+| ISC-24 | No embedding cost burn at limit | **PASS** — pre-check before embedding (N-06 fixed) |
+| ISC-25 | Content has minimum length | **PASS** — empty rejected (N-08 fixed) |
+| ISC-26 | No dead auth code with wrong algorithms | **PASS** — jwt.py + middleware.py deleted (N-09 fixed) |
 
-**Result: 16/26 PASS, 3/26 PARTIAL, 7/26 FAIL**
+**Result: 26/26 PASS**
 
-Improvement from initial assessment: 7/20 PASS → 16/26 PASS (significant hardening achieved).
+### Re-Assessment Remediation Status
+
+All 10 re-assessment findings have been fixed.
+
+| Finding | Fix | File(s) Changed |
+|---------|-----|-----------------|
+| N-01 | Deleted dead code `middleware.py` and `jwt.py` | `src/auth/middleware.py`, `src/auth/jwt.py` (deleted) |
+| N-02 | DB trigger `check_bank_limit` enforces limit at database level | `migrations/004_bank_limit_trigger.sql` |
+| N-03 | `SELECT FOR UPDATE` in transaction for bank creation | `src/db/banks.py` |
+| N-04 | Bank name (100 char) + slug (50 char, format regex) validation | `src/server.py`, `src/config.py` |
+| N-05 | Query length limit (10KB) in `search_memories` | `src/server.py`, `src/config.py` |
+| N-06 | Pre-check `get_memory_count` before embedding generation | `src/tools/memory_tools.py` |
+| N-07 | Metadata length check uses `.encode("utf-8")` for bytes | `src/server.py` |
+| N-08 | Empty/whitespace content rejected | `src/server.py` |
+| N-09 | Deleted `jwt.py` (RS256 mismatch with active ES256 provider) | `src/auth/jwt.py` (deleted) |
+| N-10 | `get_memory_count` repurposed for N-06 pre-check | `src/tools/memory_tools.py` |
