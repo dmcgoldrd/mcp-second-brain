@@ -483,6 +483,7 @@ class TestCreateBankTool:
 
         with (
             patch("src.server._resolve_auth", new_callable=AsyncMock, return_value=AUTH_CONTEXT),
+            patch("src.server.is_subscription_active", new_callable=AsyncMock, return_value=False),
             patch(
                 "src.server.banks_db.create_bank", new_callable=AsyncMock, return_value=fake_result
             ),
@@ -501,6 +502,7 @@ class TestCreateBankTool:
 
         with (
             patch("src.server._resolve_auth", new_callable=AsyncMock, return_value=AUTH_CONTEXT),
+            patch("src.server.is_subscription_active", new_callable=AsyncMock, return_value=False),
             patch(
                 "src.server.banks_db.create_bank", new_callable=AsyncMock, return_value=fake_result
             ),

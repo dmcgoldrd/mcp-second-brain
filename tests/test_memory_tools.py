@@ -20,9 +20,6 @@ def _enter_mock_deps(stack: ExitStack) -> None:
     mock_limiter.check.return_value = True
     stack.enter_context(patch("src.tools.memory_tools.embedding_limiter", mock_limiter))
     stack.enter_context(
-        patch("src.tools.memory_tools.get_memory_count", new_callable=AsyncMock, return_value=0)
-    )
-    stack.enter_context(
         patch(
             "src.tools.memory_tools.is_subscription_active",
             new_callable=AsyncMock,
@@ -195,22 +192,29 @@ class TestCreateMemory:
         assert result["memory_id"] == str(mem_id)
 
     async def test_memory_limit_reached(self):
+        """F-05: Limit check now happens atomically in db.create_memory."""
         from src.tools.memory_tools import create_memory
 
-        mock_limiter = MagicMock()
-        mock_limiter.check.return_value = True
+        # db.create_memory returns limit error when count >= limit
+        db_limit_error = {"error": "memory_limit_reached", "count": 1000, "limit": 1000}
 
-        with (
-            patch("src.tools.memory_tools.embedding_limiter", mock_limiter),
-            patch(
-                "src.tools.memory_tools.get_memory_count", new_callable=AsyncMock, return_value=1000
-            ),
-            patch(
-                "src.tools.memory_tools.is_subscription_active",
-                new_callable=AsyncMock,
-                return_value=False,
-            ),
-        ):
+        with ExitStack() as stack:
+            _enter_mock_deps(stack)
+            stack.enter_context(
+                patch(
+                    "src.tools.memory_tools.generate_embedding",
+                    new_callable=AsyncMock,
+                    return_value=FAKE_EMBEDDING,
+                )
+            )
+            stack.enter_context(
+                patch(
+                    "src.tools.memory_tools.db.create_memory",
+                    new_callable=AsyncMock,
+                    return_value=db_limit_error,
+                )
+            )
+
             result = await create_memory(
                 user_id=VALID_USER_ID, bank_id=VALID_BANK_ID, content="test"
             )
@@ -226,9 +230,6 @@ class TestCreateMemory:
 
         with (
             patch("src.tools.memory_tools.embedding_limiter", mock_limiter),
-            patch(
-                "src.tools.memory_tools.get_memory_count", new_callable=AsyncMock, return_value=0
-            ),
             patch(
                 "src.tools.memory_tools.is_subscription_active",
                 new_callable=AsyncMock,

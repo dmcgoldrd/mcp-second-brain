@@ -8,10 +8,20 @@ OIDC discovery endpoint instead.
 
 from __future__ import annotations
 
+import logging
+import time
+
 import httpx
 from fastmcp.server.auth.providers.supabase import SupabaseProvider
 from starlette.responses import JSONResponse
 from starlette.routing import Route
+
+logger = logging.getLogger("mcp-brain")
+
+# F-14: OIDC metadata cache (5-minute TTL)
+_OIDC_CACHE_TTL = 300  # seconds
+_oidc_cache: dict[str, object] = {}
+_oidc_cache_expires: float = 0.0
 
 
 class MCPBrainAuthProvider(SupabaseProvider):
@@ -36,7 +46,15 @@ class MCPBrainAuthProvider(SupabaseProvider):
 
         async def oauth_authorization_server_metadata(request):
             """Serve OAuth AS metadata constructed from Supabase's OIDC config."""
+            global _oidc_cache, _oidc_cache_expires
+
             try:
+                now = time.monotonic()
+
+                # F-14: Return cached response if valid
+                if _oidc_cache and now < _oidc_cache_expires:
+                    return JSONResponse(_oidc_cache)
+
                 async with httpx.AsyncClient() as client:
                     response = await client.get(oidc_url)
                     response.raise_for_status()
@@ -61,12 +79,19 @@ class MCPBrainAuthProvider(SupabaseProvider):
                         "code_challenge_methods_supported", ["S256"]
                     ),
                 }
+
+                # F-14: Cache the response
+                _oidc_cache = metadata
+                _oidc_cache_expires = now + _OIDC_CACHE_TTL
+
                 return JSONResponse(metadata)
-            except Exception as e:
+            except Exception:
+                # F-07: Don't leak exception details to clients
+                logger.exception("Failed to fetch OIDC metadata from %s", oidc_url)
                 return JSONResponse(
                     {
                         "error": "server_error",
-                        "error_description": f"Failed to fetch OIDC metadata: {e}",
+                        "error_description": "Failed to fetch authorization server metadata",
                     },
                     status_code=500,
                 )

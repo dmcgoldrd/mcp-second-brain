@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections import defaultdict
+from collections import OrderedDict
 from dataclasses import dataclass, field
 
 
@@ -31,17 +31,32 @@ class _TokenBucket:
 
 
 class RateLimiter:
-    """Per-user rate limiter with configurable capacity and refill rate."""
+    """Per-user rate limiter with configurable capacity, refill rate, and max entries.
 
-    def __init__(self, capacity: int = 60, refill_rate: float = 1.0) -> None:
+    Uses an OrderedDict with LRU eviction to prevent unbounded memory growth (F-06).
+    """
+
+    def __init__(
+        self, capacity: int = 60, refill_rate: float = 1.0, max_buckets: int = 10_000
+    ) -> None:
         self.capacity = capacity
         self.refill_rate = refill_rate
-        self._buckets: dict[str, _TokenBucket] = defaultdict(
-            lambda: _TokenBucket(capacity=self.capacity, refill_rate=self.refill_rate)
-        )
+        self.max_buckets = max_buckets
+        self._buckets: OrderedDict[str, _TokenBucket] = OrderedDict()
 
     def check(self, user_id: str) -> bool:
         """Returns True if the request is allowed, False if rate limited."""
+        if user_id in self._buckets:
+            # Move to end (most recently used)
+            self._buckets.move_to_end(user_id)
+        else:
+            # Evict oldest entry if at capacity
+            if len(self._buckets) >= self.max_buckets:
+                self._buckets.popitem(last=False)
+            self._buckets[user_id] = _TokenBucket(
+                capacity=self.capacity, refill_rate=self.refill_rate
+            )
+
         return self._buckets[user_id].consume()
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from tests.conftest import FAKE_EMBEDDING, TEST_BANK_ID, TEST_USER_ID
 
@@ -16,6 +16,31 @@ VALID_MEMORY_ID = str(uuid.uuid4())
 def _patch_pool(mock_pool):
     """Return a context manager that patches get_pool to return mock_pool."""
     return patch("src.db.memories.get_pool", new_callable=AsyncMock, return_value=mock_pool)
+
+
+class _AsyncCtx:
+    """Minimal async context manager wrapper for mocks."""
+
+    def __init__(self, value):
+        self._value = value
+
+    async def __aenter__(self):
+        return self._value
+
+    async def __aexit__(self, *args):
+        return False
+
+
+def _make_transactional_pool(fetchrow_return=None):
+    """Create a mock pool that supports pool.acquire() → conn.transaction() → conn.fetchrow()."""
+    conn = AsyncMock()
+    conn.fetchrow = AsyncMock(return_value=fetchrow_return)
+    conn.transaction = MagicMock(return_value=_AsyncCtx(None))
+
+    pool = MagicMock()
+    pool.acquire = MagicMock(return_value=_AsyncCtx(conn))
+
+    return pool, conn
 
 
 # ===== create_memory =====
@@ -34,10 +59,9 @@ class TestCreateMemory:
             "source": "mcp",
             "created_at": datetime.utcnow(),
         }
-        mock_pool = AsyncMock()
-        mock_pool.fetchrow = AsyncMock(return_value=fake_row)
+        pool, conn = _make_transactional_pool(fetchrow_return=fake_row)
 
-        with _patch_pool(mock_pool):
+        with _patch_pool(pool):
             result = await create_memory(
                 user_id=VALID_USER_ID,
                 bank_id=VALID_BANK_ID,
@@ -51,15 +75,14 @@ class TestCreateMemory:
 
         assert result["content"] == "hello"
         assert result["memory_type"] == "observation"
-        mock_pool.fetchrow.assert_called_once()
+        conn.fetchrow.assert_called_once()
 
     async def test_defaults_metadata_to_empty_dict(self):
         from src.db.memories import create_memory
 
-        mock_pool = AsyncMock()
-        mock_pool.fetchrow = AsyncMock(return_value={"id": uuid.uuid4()})
+        pool, conn = _make_transactional_pool(fetchrow_return={"id": uuid.uuid4()})
 
-        with _patch_pool(mock_pool):
+        with _patch_pool(pool):
             await create_memory(
                 user_id=VALID_USER_ID,
                 bank_id=VALID_BANK_ID,
@@ -67,17 +90,16 @@ class TestCreateMemory:
                 embedding=FAKE_EMBEDDING,
             )
 
-        call_args = mock_pool.fetchrow.call_args
+        call_args = conn.fetchrow.call_args
         # metadata arg (index 6 in positional args — query, id, user_uuid, bank_uuid, content, embedding, metadata)
         assert call_args.args[6] == {}
 
     async def test_defaults_tags_to_empty_list(self):
         from src.db.memories import create_memory
 
-        mock_pool = AsyncMock()
-        mock_pool.fetchrow = AsyncMock(return_value={"id": uuid.uuid4()})
+        pool, conn = _make_transactional_pool(fetchrow_return={"id": uuid.uuid4()})
 
-        with _patch_pool(mock_pool):
+        with _patch_pool(pool):
             await create_memory(
                 user_id=VALID_USER_ID,
                 bank_id=VALID_BANK_ID,
@@ -85,17 +107,16 @@ class TestCreateMemory:
                 embedding=FAKE_EMBEDDING,
             )
 
-        call_args = mock_pool.fetchrow.call_args
+        call_args = conn.fetchrow.call_args
         # tags arg (index 8)
         assert call_args.args[8] == []
 
     async def test_returns_empty_dict_when_no_row(self):
         from src.db.memories import create_memory
 
-        mock_pool = AsyncMock()
-        mock_pool.fetchrow = AsyncMock(return_value=None)
+        pool, _conn = _make_transactional_pool(fetchrow_return=None)
 
-        with _patch_pool(mock_pool):
+        with _patch_pool(pool):
             result = await create_memory(
                 user_id=VALID_USER_ID,
                 bank_id=VALID_BANK_ID,
@@ -117,6 +138,27 @@ class TestCreateMemory:
         )
 
         assert "error" in result
+
+    async def test_memory_limit_enforced_atomically(self):
+        """F-05: Atomic limit check via SELECT FOR UPDATE."""
+        from src.db.memories import create_memory
+
+        pool, conn = _make_transactional_pool()
+        # First fetchrow = limit check (returns count at limit)
+        # No second fetchrow because limit is exceeded
+        conn.fetchrow = AsyncMock(return_value={"memory_count": 1000})
+
+        with _patch_pool(pool):
+            result = await create_memory(
+                user_id=VALID_USER_ID,
+                bank_id=VALID_BANK_ID,
+                content="test",
+                embedding=FAKE_EMBEDDING,
+                memory_limit=1000,
+            )
+
+        assert result["error"] == "memory_limit_reached"
+        assert result["count"] == 1000
 
 
 # ===== search_memories =====

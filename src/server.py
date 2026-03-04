@@ -17,8 +17,20 @@ from fastmcp.server.auth import AccessToken
 from fastmcp.server.dependencies import CurrentAccessToken, get_http_headers
 
 from src.auth.provider import MCPBrainAuthProvider
-from src.config import MAX_CONTENT_LENGTH, SUPABASE_URL
+from src.config import (
+    BASE_URL,
+    MAX_BANKS_FREE,
+    MAX_BANKS_PAID,
+    MAX_CONTENT_LENGTH,
+    MAX_METADATA_LENGTH,
+    MAX_TAG_LENGTH,
+    MAX_TAGS,
+    SUPABASE_URL,
+    VALID_MEMORY_TYPES,
+    VALID_SOURCES,
+)
 from src.db import banks as banks_db
+from src.db.profiles import is_subscription_active
 from src.ratelimit import tool_limiter
 from src.tools import memory_tools
 
@@ -28,7 +40,7 @@ logger = logging.getLogger("mcp-brain")
 # Create the auth provider — validates Supabase JWTs and serves OAuth metadata
 auth_provider = MCPBrainAuthProvider(
     project_url=SUPABASE_URL,
-    base_url="http://localhost:8080",
+    base_url=BASE_URL,
     algorithm="ES256",
 )
 
@@ -71,7 +83,7 @@ async def _resolve_auth(token: AccessToken) -> dict[str, str]:
     if bank_slug:
         bank = await banks_db.get_bank_by_slug(user_id, bank_slug)
         if not bank:
-            raise ValueError(f"Bank '{bank_slug}' not found for this user")
+            raise ValueError("Bank not found")
         bank_id = str(bank["id"])
     else:
         default_bank = await banks_db.get_default_bank(user_id)
@@ -113,17 +125,60 @@ async def create_memory(
     """
     auth = await _resolve_auth(token)
 
-    if len(content) > MAX_CONTENT_LENGTH:
+    # F-11: Check content length in bytes, not characters
+    if len(content.encode("utf-8")) > MAX_CONTENT_LENGTH:
         return json.dumps(
             {
                 "status": "error",
                 "error": "content_too_long",
-                "message": f"Content exceeds {MAX_CONTENT_LENGTH} character limit.",
+                "message": f"Content exceeds {MAX_CONTENT_LENGTH} byte limit.",
             }
         )
 
+    # F-02: Validate memory_type
+    if memory_type and memory_type not in VALID_MEMORY_TYPES:
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "invalid_memory_type",
+                "message": "Invalid memory type. Must be one of: "
+                + ", ".join(sorted(VALID_MEMORY_TYPES)),
+            }
+        )
+
+    # F-03: Validate source
+    if source not in VALID_SOURCES:
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "invalid_source",
+                "message": f"Invalid source. Must be one of: {', '.join(sorted(VALID_SOURCES))}",
+            }
+        )
+
+    # F-04: Validate tags
+    if tags:
+        if len(tags) > MAX_TAGS:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": "too_many_tags",
+                    "message": f"Maximum {MAX_TAGS} tags allowed.",
+                }
+            )
+        tags = [t[:MAX_TAG_LENGTH] for t in tags]
+
+    # F-08: Validate metadata size
     parsed_metadata = None
     if metadata:
+        if len(metadata) > MAX_METADATA_LENGTH:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": "metadata_too_large",
+                    "message": f"Metadata exceeds {MAX_METADATA_LENGTH} character limit.",
+                }
+            )
         try:
             parsed_metadata = json.loads(metadata)
         except json.JSONDecodeError:
@@ -187,6 +242,19 @@ async def list_memories(
     """
     auth = await _resolve_auth(token)
     limit = max(1, min(100, limit))
+    offset = max(0, offset)  # F-10: Ensure non-negative offset
+
+    # F-02: Validate memory_type filter
+    if memory_type and memory_type not in VALID_MEMORY_TYPES:
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "invalid_memory_type",
+                "message": "Invalid memory type. Must be one of: "
+                + ", ".join(sorted(VALID_MEMORY_TYPES)),
+            }
+        )
+
     results = await memory_tools.list_memories(
         user_id=auth["user_id"],
         bank_id=auth["bank_id"],
@@ -270,10 +338,14 @@ async def create_bank(
     for different contexts (e.g., 'work', 'personal', 'research').
     """
     auth = await _resolve_auth(token)
+    # F-09: Resolve bank limit based on subscription
+    is_paid = await is_subscription_active(auth["user_id"])
+    max_banks = MAX_BANKS_PAID if is_paid else MAX_BANKS_FREE
     result = await banks_db.create_bank(
         user_id=auth["user_id"],
         name=name,
         slug=slug,
+        max_banks=max_banks,
     )
     if "error" in result:
         return json.dumps({"status": "error", "message": result["error"]}, indent=2)

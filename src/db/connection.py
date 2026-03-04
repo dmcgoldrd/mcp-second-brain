@@ -1,9 +1,13 @@
 """Database connection pool using asyncpg with pgvector support."""
 
+import logging
+
 import asyncpg
 from pgvector.asyncpg import register_vector
 
 from src.config import SUPABASE_DB_URL
+
+logger = logging.getLogger("mcp-brain")
 
 _pool: asyncpg.Pool | None = None
 

@@ -6,7 +6,7 @@ from typing import Any
 
 from src.config import FREE_MEMORY_LIMIT, PAID_MEMORY_LIMIT
 from src.db import memories as db
-from src.db.profiles import get_memory_count, is_subscription_active
+from src.db.profiles import is_subscription_active
 from src.embeddings import generate_embedding
 from src.metadata import classify_memory_type, extract_metadata
 from src.ratelimit import embedding_limiter
@@ -27,18 +27,9 @@ async def create_memory(
     and basic metadata is extracted via heuristics. The AI client can
     provide richer metadata (entities, topics, sentiment) directly.
     """
-    # Check subscription limits BEFORE calling OpenAI
-    count = await get_memory_count(user_id)
+    # Resolve memory limit for atomic DB check (F-05)
     is_paid = await is_subscription_active(user_id)
-    limit = PAID_MEMORY_LIMIT if is_paid else FREE_MEMORY_LIMIT
-
-    if count >= limit:
-        return {
-            "status": "error",
-            "error": "memory_limit_reached",
-            "message": f"You have {count}/{limit} memories. "
-            + ("Upgrade your plan for more." if not is_paid else "Limit reached."),
-        }
+    memory_limit = PAID_MEMORY_LIMIT if is_paid else FREE_MEMORY_LIMIT
 
     # Embedding rate limit
     if not embedding_limiter.check(user_id):
@@ -60,7 +51,7 @@ async def create_memory(
     if metadata:
         auto_metadata.update(metadata)
 
-    # Store in database
+    # Store in database — limit check is atomic inside the transaction (F-05)
     result = await db.create_memory(
         user_id=user_id,
         bank_id=bank_id,
@@ -70,7 +61,18 @@ async def create_memory(
         memory_type=memory_type,
         tags=tags,
         source=source,
+        memory_limit=memory_limit,
     )
+
+    # Handle limit reached (returned by atomic check in DB layer)
+    if "error" in result and result["error"] == "memory_limit_reached":
+        count = result.get("count", 0)
+        return {
+            "status": "error",
+            "error": "memory_limit_reached",
+            "message": f"You have {count}/{memory_limit} memories. "
+            + ("Upgrade your plan for more." if not is_paid else "Limit reached."),
+        }
 
     return {
         "status": "created",

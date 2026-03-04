@@ -161,7 +161,8 @@ class TestCreateBank:
             "created_at": datetime.utcnow(),
         }
         mock_pool = AsyncMock()
-        mock_pool.fetchrow = AsyncMock(return_value=fake_row)
+        # First fetchrow = count_user_banks (returns count=0), second = INSERT RETURNING
+        mock_pool.fetchrow = AsyncMock(side_effect=[{"cnt": 0}, fake_row])
 
         with _patch_pool(mock_pool):
             result = await create_bank(VALID_USER_ID, "Research", "research")
@@ -180,9 +181,23 @@ class TestCreateBank:
         from src.db.banks import create_bank
 
         mock_pool = AsyncMock()
-        mock_pool.fetchrow = AsyncMock(return_value=None)
+        # First fetchrow = count (0), second = INSERT returns None
+        mock_pool.fetchrow = AsyncMock(side_effect=[{"cnt": 0}, None])
 
         with _patch_pool(mock_pool):
             result = await create_bank(VALID_USER_ID, "Test", "test")
 
         assert result == {}
+
+    async def test_rejects_when_bank_limit_reached(self):
+        """F-09: Bank creation limit enforcement."""
+        from src.db.banks import create_bank
+
+        mock_pool = AsyncMock()
+        mock_pool.fetchrow = AsyncMock(return_value={"cnt": 10})
+
+        with _patch_pool(mock_pool):
+            result = await create_bank(VALID_USER_ID, "Test", "test", max_banks=10)
+
+        assert "error" in result
+        assert "limit" in result["error"].lower()

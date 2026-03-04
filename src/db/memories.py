@@ -19,8 +19,13 @@ async def create_memory(
     memory_type: str = "observation",
     tags: list[str] | None = None,
     source: str = "mcp",
+    memory_limit: int | None = None,
 ) -> dict[str, Any]:
-    """Insert a new memory with its embedding."""
+    """Insert a new memory with its embedding.
+
+    If memory_limit is provided, atomically checks the user's memory_count
+    against the limit before inserting (F-05: prevents TOCTOU race).
+    """
     try:
         user_uuid = uuid.UUID(user_id)
         bank_uuid = uuid.UUID(bank_id)
@@ -31,23 +36,38 @@ async def create_memory(
     memory_uuid = uuid.uuid4()
     embedding_array = np.array(embedding, dtype=np.float32)
 
-    row = await pool.fetchrow(
-        """
-        INSERT INTO memories
-            (id, user_id, bank_id, content, embedding, metadata, memory_type, tags, source)
-        VALUES ($1, $2::uuid, $3::uuid, $4, $5, $6::jsonb, $7, $8, $9)
-        RETURNING id, content, metadata, memory_type, tags, source, created_at
-        """,
-        memory_uuid,
-        user_uuid,
-        bank_uuid,
-        content,
-        embedding_array,
-        metadata or {},
-        memory_type,
-        tags or [],
-        source,
-    )
+    async with pool.acquire() as conn, conn.transaction():
+        # F-05: Atomic limit check with row lock to prevent TOCTOU race
+        if memory_limit is not None:
+            row = await conn.fetchrow(
+                "SELECT memory_count FROM profiles WHERE id = $1::uuid FOR UPDATE",
+                user_uuid,
+            )
+            count = row["memory_count"] if row else 0
+            if count >= memory_limit:
+                return {
+                    "error": "memory_limit_reached",
+                    "count": count,
+                    "limit": memory_limit,
+                }
+
+        row = await conn.fetchrow(
+            """
+                INSERT INTO memories
+                    (id, user_id, bank_id, content, embedding, metadata, memory_type, tags, source)
+                VALUES ($1, $2::uuid, $3::uuid, $4, $5, $6::jsonb, $7, $8, $9)
+                RETURNING id, content, metadata, memory_type, tags, source, created_at
+                """,
+            memory_uuid,
+            user_uuid,
+            bank_uuid,
+            content,
+            embedding_array,
+            metadata or {},
+            memory_type,
+            tags or [],
+            source,
+        )
     return dict(row) if row else {}
 
 
