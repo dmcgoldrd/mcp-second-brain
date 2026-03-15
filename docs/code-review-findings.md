@@ -1,129 +1,158 @@
 # Code Review Findings — MCP Brain src/
 
-Review of all 11 source files for reuse, quality, efficiency, and security.
+Comprehensive review by 3 parallel agents (Reuse, Quality, Efficiency) across all 11 source files.
 
-## Code Reuse
+## Critical Bugs
 
-### R-1: Duplicated UUID parsing (HIGH)
-**Files:** `db/memories.py`, `db/banks.py`, `db/profiles.py`
-**Issue:** Every DB function has identical UUID parsing boilerplate:
-```python
-try:
-    user_uuid = uuid.UUID(user_id)
-except ValueError:
-    return []  # or None, or 0, or False — inconsistent!
-```
-**Fix:** Extract to a shared utility:
-```python
-# db/utils.py
-def parse_uuid(value: str, field_name: str = "id") -> uuid.UUID:
-    """Parse a UUID string, raising ValueError with context on failure."""
-    try:
-        return uuid.UUID(value)
-    except ValueError:
-        raise ValueError(f"Invalid {field_name} format: expected UUID")
-```
-Then use consistently with a decorator or early return pattern. The inconsistent return types ([], None, 0, False, dict) on parse failure are a maintenance hazard.
+### BUG-1: `get_memory_stats` timestamps are broken (CRITICAL)
+**File:** `src/db/memories.py:196-223`
+The `MIN(created_at)` and `MAX(created_at)` operate on a subquery that doesn't include `created_at` — they will return NULL or wrong values. The subquery only has `memory_type` and `type_count`.
 
-### R-2: Pool acquisition pattern (LOW)
+**Fix:** Rewrite to include timestamps in the subquery or use a single-pass query with conditional aggregation.
+
+### BUG-2: `profiles.py` has no UUID validation (HIGH)
+**File:** `src/db/profiles.py:20,29,39`
+All three functions call `uuid.UUID(user_id)` with no try/except. Invalid UUID strings raise unhandled `ValueError` → 500 errors. Unlike `memories.py` and `banks.py` which have guards.
+
+**Fix:** Add try/except or use shared UUID parser (see R-1).
+
+## Code Reuse (10 findings)
+
+### R-1: UUID parsing duplicated 13 times with inconsistent fallbacks (HIGH)
 **Files:** All db/ modules
-**Issue:** `pool = await get_pool()` at the start of every function. Not a bug but could become one if pool initialization changes.
-**Fix:** Consider a thin base class or module-level pool reference, but this is low priority.
+Every DB function has identical `try: uuid.UUID(user_id) except ValueError: return <fallback>` but with different fallbacks ([], None, 0, False, dict). Extract `parse_uuid()` utility.
 
-## Code Quality
+### R-2: Error response construction duplicated 10+ times (HIGH)
+**File:** `src/server.py`, `src/tools/memory_tools.py`
+`{"status": "error", "error": "...", "message": "..."}` is hand-built everywhere. Extract `error_response(code, message)` helper.
 
-### Q-1: Deprecated datetime usage (MEDIUM)
-**File:** `metadata.py:46`
-**Issue:** `datetime.utcnow()` is deprecated since Python 3.12.
-**Fix:** `datetime.now(timezone.utc)` or `datetime.now(UTC)`.
+### R-3: Memory serialization duplicated between search and list (MEDIUM)
+**File:** `src/tools/memory_tools.py:122-132 vs 151-161`
+Nearly identical dict comprehensions. Extract `_serialize_memory()`.
 
-### Q-2: Inconsistent error handling (MEDIUM)
-**Files:** `db/memories.py` vs `server.py`
-**Issue:** DB layer returns error dicts (`{"error": "..."}`) for some failures but lets exceptions propagate for others (e.g., `profiles.py:is_subscription_active()` would raise `ValueError` if UUID is invalid, not caught). Server layer returns JSON error strings.
-**Fix:** Standardize: DB layer raises exceptions, tools layer catches and formats. Or: DB layer always returns Result types.
+### R-4: Memory limit message duplicated identically (LOW)
+**File:** `src/tools/memory_tools.py:39-43 and 82-86`
 
-### Q-3: Magic numbers in heuristic classifier (LOW)
-**File:** `metadata.py:58-71`
-**Issue:** Keyword lists for memory type classification are inline, not configurable.
-**Fix:** Move to config.py as `MEMORY_TYPE_KEYWORDS` dict. Low priority — these will likely be replaced by LLM classification.
+### R-5: `memory_type` validation duplicated between create and list (LOW)
+**File:** `src/server.py:155-163 and 275-283`
 
-### Q-4: Missing type narrowing on pool operations (LOW)
-**File:** `db/memories.py:93-104`
-**Issue:** `hybrid_search` call returns rows but no validation that expected columns exist.
-**Fix:** Add type annotations or row validation. Low priority — DB schema enforces this.
+### R-6: Two DB queries where one suffices for subscription + count (MEDIUM)
+**File:** `src/tools/memory_tools.py:31-36`
+`is_subscription_active()` and `get_memory_count()` are separate roundtrips to the same table.
 
-## Efficiency
+### R-7: `list_memories` query has full duplication for optional filter (LOW)
+**File:** `src/db/memories.py:141-169`
+Two near-identical SQL queries differing by one WHERE clause.
 
-### E-1: Two separate DB queries for subscription check (MEDIUM)
-**File:** `tools/memory_tools.py:31-37`
-**Issue:** `is_subscription_active(user_id)` and `get_memory_count(user_id)` are two separate DB roundtrips. They could be a single query.
-**Fix:**
-```python
-async def get_user_limits(user_id: str) -> tuple[bool, int]:
-    """Get subscription status and memory count in one query."""
-    pool = await get_pool()
-    row = await pool.fetchrow(
-        "SELECT subscription_status, memory_count FROM profiles WHERE id = $1::uuid",
-        uuid.UUID(user_id),
-    )
-    is_paid = row["subscription_status"] == "active" if row else False
-    count = row["memory_count"] if row else 0
-    return is_paid, count
-```
+### R-8: `np.array(embedding, dtype=np.float32)` duplicated (LOW)
+**File:** `src/db/memories.py:38 and 84`
 
-### E-2: No access tracking on search (NEEDED for consolidation)
-**File:** `db/memories.py:75-122`
-**Issue:** `search_memories()` doesn't update `access_count` or `last_accessed_at` on returned memories. This data is needed for importance scoring in consolidation.
-**Fix:** After fetching results, fire an async UPDATE for returned memory IDs. Use `asyncio.create_task()` to avoid blocking the search response.
+### R-9: `source` default `"mcp"` hardcoded in 3 places (LOW)
+**Files:** `src/server.py:123`, `src/tools/memory_tools.py:22`, `src/db/memories.py:22`
 
-### E-3: Embedding not cached across create+conflict check
-**Issue:** When we add on-write conflict detection, the embedding generated for the new memory should be reused for the similarity search — not generated twice.
-**Fix:** Already handled in the architecture design (generate embedding once, use for both insert and similarity search).
+### R-10: No bank_tools.py — server.py reaches directly into banks DB (MEDIUM)
+**File:** `src/server.py:71-100, 336-350`
+`_resolve_auth` and `list_banks` bypass the tools layer.
 
-### E-4: Rate limiter doesn't persist across restarts (KNOWN)
-**File:** `ratelimit.py`
-**Issue:** In-memory token buckets reset on deploy. Known limitation, documented in deployment.md.
-**Fix:** Acceptable for single-process. For multi-process, would need Redis. Low priority.
+## Code Quality (7 findings)
 
-## Security
+### Q-1: `datetime.utcnow()` deprecated since Python 3.12 (MEDIUM)
+**File:** `src/metadata.py:46`
 
-### S-1: Service role key for consolidation endpoint (PLANNED)
-**Issue:** The planned `/api/consolidate` endpoint needs auth. Using `SUPABASE_SERVICE_ROLE_KEY` as `X-Service-Key` is acceptable for server-to-server auth but must use constant-time comparison.
-**Fix:** Use `hmac.compare_digest()` for key comparison, not `==`.
+### Q-2: Stringly-typed memory types and sources (MEDIUM)
+**Files:** `src/config.py:51-60`, `src/metadata.py:59-71`
+Should be `StrEnum` for type safety.
 
-### S-2: Stripe webhook signature verification (PLANNED)
-**Issue:** The planned Stripe webhook handler must verify the `Stripe-Signature` header.
-**Fix:** Use `stripe.Webhook.construct_event()` with the webhook signing secret.
+### Q-3: Error codes are scattered raw strings (LOW)
+**Files:** `src/server.py`, `src/tools/memory_tools.py`
 
-### S-3: Bulk import rate limiting (PLANNED)
-**Issue:** `import_memories` could be used to flood the system with thousands of memories in one call.
-**Fix:** Limit batch size (max 100 per call), rate limit per user, count against memory limit.
+### Q-4: `create_bank` exception handler leaks partial DB errors (HIGH)
+**File:** `src/db/banks.py:132-136`
+Catches generic `Exception`, checks for "unique" in error message string. Should catch `asyncpg.UniqueViolationError` specifically.
 
-### S-4: Consolidation LLM prompt injection (MEDIUM)
-**Issue:** Memory content is passed to LLM during consolidation conflict resolution. Malicious memory content could include prompt injection attempts.
-**Fix:** Sanitize memory content before passing to LLM. Use structured output mode. Limit content length in LLM prompts.
+### Q-5: `SUPABASE_SERVICE_ROLE_KEY` loaded but unused (MEDIUM)
+**File:** `src/config.py:15`
+Sits in process memory unnecessarily.
 
-## Architecture Readiness
+### Q-6: Connection pool never closed on shutdown (MEDIUM)
+**File:** `src/main.py` — no lifespan handler. `close_pool()` exists but is never called.
 
-### For Conflict Detection:
-- Embedding pipeline is ready (generate once, reuse for similarity + insert)
-- Need: similarity search query addition to create flow
-- Need: conflict response format in MCP tool
+### Q-7: `create_memory` has 9 parameters (LOW)
+**File:** `src/db/memories.py:14-24` — consider a `MemoryInput` dataclass.
 
-### For Consolidation:
-- Need: access_count and last_accessed_at tracking on search
-- Need: importance_score, archived_at, superseded_by columns
-- Need: consolidation_log table
-- Pool size (min=2, max=10) is fine for current load but may need tuning for batch consolidation
+## Efficiency (12 findings)
 
-### For Entity Extraction:
-- Need: memory_entities table
-- JSONB metadata column already exists for storing entity references per-memory
-- FTS index exists for entity name search
+### E-1: Two DB roundtrips for subscription check + count (MEDIUM)
+**File:** `src/tools/memory_tools.py:31-36`
+Combine into single query.
 
-## Summary
+### E-2: `_resolve_auth` bank resolution hits DB on every tool call (HIGH)
+**File:** `src/server.py:71-100`
+No caching. Same default bank queried 10+ times per conversation. Add TTL cache.
 
-**Critical fixes before new features:** R-1 (UUID parsing), E-1 (combined query), Q-2 (error handling consistency)
-**Needed for consolidation:** E-2 (access tracking)
-**Planned features have no security blockers** — standard mitigations (hmac compare, Stripe signature, rate limits, prompt sanitization)
-**Architecture is clean** — the existing codebase is well-structured and ready for extension
+### E-3: `list_banks` resolves bank_id then throws it away (MEDIUM)
+**File:** `src/server.py:326-350`
+Wasted DB query. Extract `_resolve_user()` for tools that don't need bank.
+
+### E-4: No batch embedding support (HIGH for consolidation)
+**File:** `src/embeddings.py:17-25`
+Only single-text embedding. OpenAI supports batch (up to 2048). Critical for consolidation.
+
+### E-5: No pool warm-up at startup (MEDIUM)
+Pool lazily initialized on first request. Add lifespan handler.
+
+### E-6: numpy imported for trivial type conversion (LOW)
+**File:** `src/db/memories.py:9`
+~150MB memory overhead. Test if `array.array('f', embedding)` works with pgvector.
+
+### E-7: Pool sizing may be too large (LOW)
+`min_size=2, max_size=10` — consider `min_size=1, max_size=5` for MCP workload. Add `statement_cache_size=0` if using PgBouncer.
+
+### E-8: Regex patterns not pre-compiled in metadata.py (LOW)
+**File:** `src/metadata.py:28-44`
+
+### E-9: `FOR UPDATE` lock in create_memory holds through embedding INSERT (MEDIUM)
+**File:** `src/db/memories.py:40-72`
+Serializes concurrent writes from same user.
+
+### E-10: No access tracking on search results (NEEDED for consolidation)
+**File:** `src/db/memories.py:75-122`
+Search doesn't update `access_count` / `last_accessed_at`.
+
+### E-11: No `_resolve_user()` for tools that don't need bank (MEDIUM)
+`brain_stats`, `list_banks`, `create_bank` all resolve bank unnecessarily.
+
+### E-12: Rate limiter not async-safe for multi-worker (LOW)
+**File:** `src/ratelimit.py`
+Safe for single-worker async but would race with multiple workers.
+
+## Security (5 findings)
+
+### S-1: No UUID validation on `memory_id` in server layer (MEDIUM)
+**File:** `src/server.py:296-307`
+Accepts raw string from client, DB silently returns False.
+
+### S-2: `bank_slug` from header has no length/character validation (MEDIUM)
+**File:** `src/server.py:87`
+Unlike `create_bank` which validates with regex, header-based slug goes unchecked.
+
+### S-3: In-memory rate limiter bypassed on multi-instance (KNOWN)
+**File:** `src/ratelimit.py`
+
+### S-4: Consolidation LLM prompt injection risk (PLANNED)
+Memory content passed to LLM during consolidation could contain injection attempts.
+
+### S-5: Stripe webhook needs signature verification (PLANNED)
+Must use `stripe.Webhook.construct_event()`.
+
+## Priority Fix Order
+
+1. **BUG-1**: Fix stats query timestamps (broken feature)
+2. **BUG-2**: Add UUID validation to profiles.py (unhandled 500s)
+3. **R-1**: Extract shared UUID parser (fixes BUG-2 and eliminates 13 duplicates)
+4. **R-2**: Extract error response helper (standardizes 10+ error sites)
+5. **E-2**: Add bank resolution cache (eliminates hot-path DB query)
+6. **R-6/E-1**: Combine subscription + count into single query
+7. **E-4**: Add batch embedding function (unblocks consolidation)
+8. **Q-6/E-5**: Add lifespan handler for pool warm-up + shutdown
+9. **Q-4**: Fix exception handling in create_bank
