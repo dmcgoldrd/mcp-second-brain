@@ -354,3 +354,23 @@ before, use search_memories. Always check for conflicts in the response.
 5. **Incremental consolidation** — Only process memories since last run. Scales to 100K+ memories.
 6. **Haiku for consolidation LLM calls** — Cheapest model that can classify conflicts and extract entities.
 7. **Service role key for consolidation auth** — Not user JWT. Consolidation runs as system process.
+
+## Council Debate Summary (Decision Validation)
+
+A 4-member council (Architect, Designer, Engineer, Researcher) debated all 3 decisions:
+
+### Decision 1: On-Write Conflict Detection — SPLIT 2-2
+
+**For batch (Architect + Engineer):** Write-path latency is sacred. 200-500ms added to every create is unacceptable. Conflicts persisting 12 hours costs nothing. Keep writes deterministic and testable.
+
+**For on-write (Designer + Researcher):** Trust is destroyed when "my wife is Margaret" still returns "Maria" hours later. Every production system (Mem0, Zep, ChatGPT) does it on-write. The researcher cited evidence: Mem0's paper, Zep's Graphiti paper, ChatGPT reverse-engineering all show on-write resolution.
+
+**Resolution:** Our hybrid design satisfies both camps. Embedding-only similarity search on write (~10ms pgvector query, no LLM) detects conflicts immediately. LLM-powered resolution (expensive, ambiguous cases) defers to nightly batch. Fast writes + immediate detection + deferred intelligence.
+
+### Decision 2: Consolidation Trigger — UNANIMOUS: Railway cron → HTTP endpoint
+
+All 4 agreed. pg_cron eliminated on capability (SQL-only). Separate worker eliminated on operational overhead (2-3 day timeline). HTTP endpoint reuses existing infrastructure.
+
+### Decision 3: Entity Extraction — UNANIMOUS: Postgres JSONB, not Neo4j
+
+All 4 agreed strongly. Key evidence from researcher: Mem0's graph variant (Neo4j) achieves only ~2% higher accuracy while doubling token footprint. The designer adds: structure JSONB with entity references (`{subject, relation, object}`) for clean future migration path. The engineer: "I've led a Neo4j migration and I've led a Neo4j removal. The removal was harder."
