@@ -68,6 +68,68 @@ async def get_entities(
     return [dict(row) for row in rows]
 
 
+async def get_related_entities(
+    user_id: str,
+    bank_id: str,
+    entity_name: str,
+    max_hops: int = 2,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """Find entities related to the given entity through shared memories.
+
+    Hop 1: Entities that share memories with the target entity
+    Hop 2: Entities that share memories with hop-1 entities
+
+    Uses recursive CTE for multi-hop traversal within Postgres.
+    """
+    try:
+        user_uuid = parse_uuid(user_id, "user_id")
+        bank_uuid = parse_uuid(bank_id, "bank_id")
+    except ValueError:
+        return []
+
+    # Cap max_hops at 3 to prevent runaway recursion
+    max_hops = max(1, min(3, max_hops))
+    limit = max(1, min(100, limit))
+
+    pool = await get_pool()
+
+    rows = await pool.fetch(
+        """
+        WITH RECURSIVE entity_graph AS (
+            -- Base: find the starting entity
+            SELECT e.id, e.entity_name, e.entity_type, e.memory_ids, 0 AS hop
+            FROM memory_entities e
+            WHERE e.user_id = $1::uuid AND e.bank_id = $2::uuid
+              AND e.entity_name = $3
+
+            UNION
+
+            -- Recursive: find entities sharing memories with current level
+            SELECT DISTINCT e2.id, e2.entity_name, e2.entity_type, e2.memory_ids, eg.hop + 1
+            FROM entity_graph eg
+            JOIN memory_entities e2
+              ON e2.user_id = $1::uuid
+              AND e2.bank_id = $2::uuid
+              AND e2.memory_ids && eg.memory_ids
+              AND e2.id != eg.id
+            WHERE eg.hop < $4
+        )
+        SELECT id, entity_name, entity_type, memory_ids, MIN(hop) AS hop
+        FROM entity_graph
+        GROUP BY id, entity_name, entity_type, memory_ids
+        ORDER BY MIN(hop), entity_name
+        LIMIT $5
+        """,
+        user_uuid,
+        bank_uuid,
+        entity_name,
+        max_hops,
+        limit,
+    )
+    return [dict(row) for row in rows]
+
+
 async def get_entity_memories(
     user_id: str,
     bank_id: str,

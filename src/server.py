@@ -226,6 +226,11 @@ async def search_memories(
         int,
         "Maximum number of results to return (1-50)",
     ] = 10,
+    as_of: Annotated[
+        str | None,
+        "ISO 8601 datetime to search memories as they were at that point in time. "
+        "Example: '2025-06-01T00:00:00Z'. Omit for current state.",
+    ] = None,
     token: AccessToken = CurrentAccessToken(),
 ) -> str:
     """Search your Personal Brain for relevant memories.
@@ -233,6 +238,8 @@ async def search_memories(
     Uses hybrid search combining semantic similarity (meaning-based) and
     full-text search (keyword-based) with Reciprocal Ranked Fusion scoring.
     Returns the most relevant memories sorted by relevance score.
+
+    Optionally pass as_of to search memories as they existed at a past date.
     """
     auth = await _resolve_auth(token)
 
@@ -247,11 +254,29 @@ async def search_memories(
         )
 
     limit = max(1, min(50, limit))
+
+    # Parse as_of datetime if provided
+    parsed_as_of = None
+    if as_of:
+        from datetime import datetime
+
+        try:
+            parsed_as_of = datetime.fromisoformat(as_of.replace("Z", "+00:00"))
+        except ValueError:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": "invalid_date",
+                    "message": "as_of must be a valid ISO 8601 datetime.",
+                }
+            )
+
     results = await memory_tools.search_memories(
         user_id=auth["user_id"],
         bank_id=auth["bank_id"],
         query=query,
         limit=limit,
+        as_of=parsed_as_of,
     )
     return json.dumps(results, indent=2, default=str)
 
@@ -308,6 +333,92 @@ async def delete_memory(
         memory_id=memory_id,
     )
     return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+async def update_memory(
+    memory_id: Annotated[str, "UUID of the memory to update"],
+    content: Annotated[str | None, "New content (re-embeds if changed)"] = None,
+    memory_type: Annotated[str | None, "New type"] = None,
+    tags: Annotated[list[str] | None, "New tags (replaces existing)"] = None,
+    metadata: Annotated[str | None, "New metadata as JSON string (merges with existing)"] = None,
+    token: AccessToken = CurrentAccessToken(),
+) -> str:
+    """Update an existing memory in your Personal Brain.
+
+    Only provided fields are changed. If content is updated, the embedding
+    is automatically regenerated. Version is incremented on every update.
+    """
+    auth = await _resolve_auth(token)
+
+    # Validate content length if provided
+    if content is not None:
+        if not content.strip():
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": "empty_content",
+                    "message": "Content cannot be empty.",
+                }
+            )
+        if len(content.encode("utf-8")) > MAX_CONTENT_LENGTH:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": "content_too_long",
+                    "message": f"Content exceeds {MAX_CONTENT_LENGTH} byte limit.",
+                }
+            )
+
+    # Validate memory_type if provided
+    if memory_type and memory_type not in VALID_MEMORY_TYPES:
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "invalid_memory_type",
+                "message": "Invalid memory type. Must be one of: "
+                + ", ".join(sorted(VALID_MEMORY_TYPES)),
+            }
+        )
+
+    # Validate tags if provided
+    if tags:
+        if len(tags) > MAX_TAGS:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": "too_many_tags",
+                    "message": f"Maximum {MAX_TAGS} tags allowed.",
+                }
+            )
+        tags = [t[:MAX_TAG_LENGTH] for t in tags]
+
+    # Parse metadata JSON if provided
+    parsed_metadata = None
+    if metadata:
+        if len(metadata.encode("utf-8")) > MAX_METADATA_LENGTH:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": "metadata_too_large",
+                    "message": f"Metadata exceeds {MAX_METADATA_LENGTH} byte limit.",
+                }
+            )
+        try:
+            parsed_metadata = json.loads(metadata)
+        except json.JSONDecodeError:
+            parsed_metadata = {"raw": metadata}
+
+    result = await memory_tools.update_memory(
+        user_id=auth["user_id"],
+        bank_id=auth["bank_id"],
+        memory_id=memory_id,
+        content=content,
+        memory_type=memory_type,
+        tags=tags,
+        metadata=parsed_metadata,
+    )
+    return json.dumps(result, indent=2, default=str)
 
 
 @mcp.tool()

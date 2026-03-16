@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from src.config import FREE_MEMORY_LIMIT, PAID_MEMORY_LIMIT
@@ -143,11 +144,14 @@ async def search_memories(
     bank_id: str,
     query: str,
     limit: int = 10,
+    as_of: datetime | None = None,
 ) -> list[dict[str, Any]]:
     """Search memories using hybrid semantic + full-text search.
 
     Results are ranked using Reciprocal Ranked Fusion. Access counts are
     automatically incremented on returned memories.
+
+    If as_of is provided, searches memories as they existed at that point in time.
     """
     # Embedding rate limit
     if not embedding_limiter.check(user_id):
@@ -155,13 +159,23 @@ async def search_memories(
 
     query_embedding = await generate_embedding(query)
 
-    results = await db.search_memories(
-        user_id=user_id,
-        bank_id=bank_id,
-        query_embedding=query_embedding,
-        query_text=query,
-        limit=limit,
-    )
+    if as_of:
+        results = await db.search_memories_at(
+            user_id=user_id,
+            bank_id=bank_id,
+            query_embedding=query_embedding,
+            query_text=query,
+            as_of=as_of,
+            limit=limit,
+        )
+    else:
+        results = await db.search_memories(
+            user_id=user_id,
+            bank_id=bank_id,
+            query_embedding=query_embedding,
+            query_text=query,
+            limit=limit,
+        )
 
     return [_serialize_memory(r, include_score=True) for r in results]
 
@@ -183,6 +197,52 @@ async def list_memories(
     )
 
     return [_serialize_memory(r, include_source=True) for r in results]
+
+
+async def update_memory(
+    user_id: str,
+    bank_id: str,
+    memory_id: str,
+    content: str | None = None,
+    memory_type: str | None = None,
+    tags: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Update an existing memory. Only provided fields are changed.
+
+    If content is provided, generates a new embedding before persisting.
+    Returns {status: "updated", memory_id, version} or {status: "not_found"}.
+    """
+    # If content changed, we need a fresh embedding
+    embedding = None
+    if content is not None:
+        if not embedding_limiter.check(user_id):
+            return {
+                "status": "error",
+                "error": "rate_limited",
+                "message": "Embedding rate limit exceeded. Please slow down.",
+            }
+        embedding = await generate_embedding(content)
+
+    row = await db.update_memory(
+        user_id=user_id,
+        bank_id=bank_id,
+        memory_id=memory_id,
+        content=content,
+        embedding=embedding,
+        memory_type=memory_type,
+        tags=tags,
+        metadata=metadata,
+    )
+
+    if row is None:
+        return {"status": "not_found", "memory_id": memory_id}
+
+    return {
+        "status": "updated",
+        "memory_id": str(row["id"]),
+        "version": row["version"],
+    }
 
 
 async def delete_memory(user_id: str, bank_id: str, memory_id: str) -> dict[str, Any]:

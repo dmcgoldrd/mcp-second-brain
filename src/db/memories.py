@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import uuid
+from datetime import datetime
 from typing import Any
 
 import numpy as np
@@ -126,6 +127,70 @@ async def search_memories(
     results = [dict(row) for row in rows]
 
     # Track access on returned memories (true fire-and-forget — don't block response)
+    if results:
+        memory_ids = [row["id"] for row in rows]
+        _task = asyncio.create_task(_update_access_counts(pool, memory_ids))  # noqa: RUF006
+
+    return results
+
+
+async def search_memories_at(
+    user_id: str,
+    bank_id: str,
+    query_embedding: list[float],
+    query_text: str = "",
+    as_of: datetime | None = None,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    """Search memories as they were at a specific point in time.
+
+    If as_of is provided:
+    - Include memories created before as_of
+    - Exclude memories that were archived/superseded before as_of
+    - This lets you query "what did I know on March 1st?"
+
+    If as_of is None, behaves like regular search_memories.
+    """
+    if as_of is None:
+        return await search_memories(
+            user_id=user_id,
+            bank_id=bank_id,
+            query_embedding=query_embedding,
+            query_text=query_text,
+            limit=limit,
+        )
+
+    pool = await get_pool()
+    embedding_array = np.array(query_embedding, dtype=np.float32)
+
+    try:
+        user_uuid = parse_uuid(user_id, "user_id")
+        bank_uuid = parse_uuid(bank_id, "bank_id")
+    except ValueError:
+        return []
+
+    rows = await pool.fetch(
+        """
+        SELECT id, content, metadata, memory_type, tags, source, created_at,
+               1 - (embedding <=> $1) AS score
+        FROM memories
+        WHERE user_id = $2::uuid AND bank_id = $3::uuid
+          AND embedding IS NOT NULL
+          AND created_at <= $4
+          AND (archived_at IS NULL OR archived_at > $4)
+        ORDER BY embedding <=> $1
+        LIMIT $5
+        """,
+        embedding_array,
+        user_uuid,
+        bank_uuid,
+        as_of,
+        limit,
+    )
+
+    results = [dict(row) for row in rows]
+
+    # Track access on returned memories (true fire-and-forget)
     if results:
         memory_ids = [row["id"] for row in rows]
         _task = asyncio.create_task(_update_access_counts(pool, memory_ids))  # noqa: RUF006
@@ -320,6 +385,81 @@ async def batch_create_memories(
                 created_ids.append(str(row["id"]))
 
     return created_ids
+
+
+async def update_memory(
+    user_id: str,
+    bank_id: str,
+    memory_id: str,
+    content: str | None = None,
+    embedding: list[float] | None = None,
+    memory_type: str | None = None,
+    tags: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Update an existing memory. Only provided fields are changed.
+
+    If content changes, the caller must also provide a new embedding.
+    Increments version and sets updated_at = now() on any update.
+    Returns the updated row dict, or None if not found.
+    """
+    try:
+        user_uuid = parse_uuid(user_id, "user_id")
+        bank_uuid = parse_uuid(bank_id, "bank_id")
+        memory_uuid = parse_uuid(memory_id, "memory_id")
+    except ValueError:
+        return None
+
+    # Build SET clauses dynamically — only touch fields that were provided
+    set_clauses: list[str] = []
+    params: list[Any] = []
+    param_idx = 4  # $1=memory_id, $2=user_id, $3=bank_id
+
+    if content is not None:
+        set_clauses.append(f"content = ${param_idx}")
+        params.append(content)
+        param_idx += 1
+
+    if embedding is not None:
+        embedding_array = np.array(embedding, dtype=np.float32)
+        set_clauses.append(f"embedding = ${param_idx}")
+        params.append(embedding_array)
+        param_idx += 1
+
+    if memory_type is not None:
+        set_clauses.append(f"memory_type = ${param_idx}")
+        params.append(memory_type)
+        param_idx += 1
+
+    if tags is not None:
+        set_clauses.append(f"tags = ${param_idx}")
+        params.append(tags)
+        param_idx += 1
+
+    if metadata is not None:
+        set_clauses.append(f"metadata = ${param_idx}::jsonb")
+        params.append(json.dumps(metadata))
+        param_idx += 1
+
+    if not set_clauses:
+        return None
+
+    # Always bump version and updated_at
+    set_clauses.append("version = version + 1")
+    set_clauses.append("updated_at = now()")
+
+    set_sql = ", ".join(set_clauses)
+    query = f"""
+        UPDATE memories
+        SET {set_sql}
+        WHERE id = $1 AND user_id = $2::uuid AND bank_id = $3::uuid
+          AND archived_at IS NULL
+        RETURNING id, content, metadata, memory_type, tags, source, version, created_at, updated_at
+    """
+
+    pool = await get_pool()
+    row = await pool.fetchrow(query, memory_uuid, user_uuid, bank_uuid, *params)
+    return dict(row) if row else None
 
 
 async def get_memory_stats(user_id: str, bank_id: str) -> dict[str, Any]:
