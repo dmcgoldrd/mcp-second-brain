@@ -6,12 +6,13 @@ import uuid
 from typing import Any
 
 from src.db.connection import get_pool
+from src.db.utils import parse_uuid
 
 
 async def get_user_banks(user_id: str) -> list[dict[str, Any]]:
     """Get all banks for a user."""
     try:
-        user_uuid = uuid.UUID(user_id)
+        user_uuid = parse_uuid(user_id, "user_id")
     except ValueError:
         return []
 
@@ -31,7 +32,7 @@ async def get_user_banks(user_id: str) -> list[dict[str, Any]]:
 async def get_bank_by_slug(user_id: str, slug: str) -> dict[str, Any] | None:
     """Get a specific bank by user_id and slug."""
     try:
-        user_uuid = uuid.UUID(user_id)
+        user_uuid = parse_uuid(user_id, "user_id")
     except ValueError:
         return None
 
@@ -51,7 +52,7 @@ async def get_bank_by_slug(user_id: str, slug: str) -> dict[str, Any] | None:
 async def get_default_bank(user_id: str) -> dict[str, Any] | None:
     """Get the user's default bank."""
     try:
-        user_uuid = uuid.UUID(user_id)
+        user_uuid = parse_uuid(user_id, "user_id")
     except ValueError:
         return None
 
@@ -70,7 +71,7 @@ async def get_default_bank(user_id: str) -> dict[str, Any] | None:
 async def count_user_banks(user_id: str) -> int:
     """Count the number of banks for a user."""
     try:
-        user_uuid = uuid.UUID(user_id)
+        user_uuid = parse_uuid(user_id, "user_id")
     except ValueError:
         return 0
 
@@ -93,7 +94,7 @@ async def create_bank(user_id: str, name: str, slug: str, max_banks: int = 10) -
     The DB also has a trigger (migration 004) as defense-in-depth (N-02).
     """
     try:
-        user_uuid = uuid.UUID(user_id)
+        user_uuid = parse_uuid(user_id, "user_id")
     except ValueError:
         return {"error": "Invalid user ID format"}
 

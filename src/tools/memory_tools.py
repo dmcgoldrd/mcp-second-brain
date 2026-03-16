@@ -38,7 +38,9 @@ async def create_memory(
     Returns conflicts (similar existing memories) in the response so the MCP
     client can decide how to handle them. Does NOT auto-resolve.
     """
-    # Single query for both subscription status and memory count
+    # Pre-check: single query for subscription status + memory count.
+    # This avoids wasting an OpenAI embedding API call when the limit is already hit.
+    # The atomic check in db.create_memory (FOR UPDATE) handles race conditions.
     is_paid, count = await get_user_limits(user_id)
     memory_limit = PAID_MEMORY_LIMIT if is_paid else FREE_MEMORY_LIMIT
 

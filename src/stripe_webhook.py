@@ -13,8 +13,6 @@ from src.db.connection import get_pool
 
 logger = logging.getLogger("mcp-brain")
 
-stripe.api_key = STRIPE_SECRET_KEY
-
 
 async def stripe_webhook_handler(request: Request) -> JSONResponse:
     """Handle Stripe webhook events for subscription lifecycle."""
@@ -26,7 +24,9 @@ async def stripe_webhook_handler(request: Request) -> JSONResponse:
         return JSONResponse({"error": "Webhook not configured"}, status_code=500)
 
     try:
-        event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, STRIPE_WEBHOOK_SECRET, api_key=STRIPE_SECRET_KEY
+        )
     except ValueError:
         logger.warning("Invalid Stripe webhook payload")
         return JSONResponse({"error": "Invalid payload"}, status_code=400)
@@ -37,18 +37,34 @@ async def stripe_webhook_handler(request: Request) -> JSONResponse:
     event_type = event["type"]
     data = event["data"]["object"]
 
-    if event_type == "checkout.session.completed":
-        await _handle_checkout_completed(data)
-    elif event_type == "customer.subscription.updated":
-        await _handle_subscription_updated(data)
-    elif event_type == "customer.subscription.deleted":
-        await _handle_subscription_deleted(data)
-    elif event_type == "invoice.payment_failed":
-        await _handle_payment_failed(data)
-    else:
-        logger.info("Unhandled Stripe event: %s", event_type)
+    try:
+        if event_type == "checkout.session.completed":
+            await _handle_checkout_completed(data)
+        elif event_type == "customer.subscription.updated":
+            await _handle_subscription_updated(data)
+        elif event_type == "customer.subscription.deleted":
+            await _handle_subscription_deleted(data)
+        elif event_type == "invoice.payment_failed":
+            await _handle_payment_failed(data)
+        else:
+            logger.info("Unhandled Stripe event: %s", event_type)
+    except Exception:
+        logger.exception("Error processing Stripe event %s", event_type)
+        return JSONResponse({"error": "Processing failed"}, status_code=500)
 
     return JSONResponse({"status": "ok"})
+
+
+async def _update_profile_status(conn, customer_id: str, status: str) -> None:
+    """Update profile subscription status by Stripe customer ID."""
+    await conn.execute(
+        """
+        UPDATE profiles SET subscription_status = $1, updated_at = now()
+        WHERE stripe_customer_id = $2
+        """,
+        status,
+        customer_id,
+    )
 
 
 async def _handle_checkout_completed(session: dict) -> None:
@@ -63,7 +79,6 @@ async def _handle_checkout_completed(session: dict) -> None:
 
     pool = await get_pool()
     async with pool.acquire() as conn, conn.transaction():
-        # Update profile with Stripe customer ID and active status
         await conn.execute(
             """
             UPDATE profiles
@@ -73,7 +88,6 @@ async def _handle_checkout_completed(session: dict) -> None:
             customer_id,
             user_id,
         )
-        # Upsert subscription record
         await conn.execute(
             """
             INSERT INTO subscriptions (user_id, stripe_subscription_id, stripe_customer_id, status)
@@ -95,26 +109,22 @@ async def _handle_subscription_updated(subscription: dict) -> None:
     status = subscription.get("status", "")
     customer_id = subscription.get("customer")
 
+    if not sub_id:
+        return
+
     pool = await get_pool()
-    await pool.execute(
-        """
-        UPDATE subscriptions SET status = $1, updated_at = now()
-        WHERE stripe_subscription_id = $2
-        """,
-        status,
-        sub_id,
-    )
-    # Also update profile status
-    if customer_id:
-        profile_status = "active" if status == "active" else status
-        await pool.execute(
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute(
             """
-            UPDATE profiles SET subscription_status = $1, updated_at = now()
-            WHERE stripe_customer_id = $2
+            UPDATE subscriptions SET status = $1, updated_at = now()
+            WHERE stripe_subscription_id = $2
             """,
-            profile_status,
-            customer_id,
+            status,
+            sub_id,
         )
+        if customer_id:
+            profile_status = "active" if status == "active" else status
+            await _update_profile_status(conn, customer_id, profile_status)
 
     logger.info("Subscription %s updated to %s", sub_id, status)
 
@@ -124,22 +134,20 @@ async def _handle_subscription_deleted(subscription: dict) -> None:
     sub_id = subscription.get("id")
     customer_id = subscription.get("customer")
 
+    if not sub_id:
+        return
+
     pool = await get_pool()
-    await pool.execute(
-        """
-        UPDATE subscriptions SET status = 'canceled', updated_at = now()
-        WHERE stripe_subscription_id = $1
-        """,
-        sub_id,
-    )
-    if customer_id:
-        await pool.execute(
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute(
             """
-            UPDATE profiles SET subscription_status = 'canceled', updated_at = now()
-            WHERE stripe_customer_id = $1
+            UPDATE subscriptions SET status = 'canceled', updated_at = now()
+            WHERE stripe_subscription_id = $1
             """,
-            customer_id,
+            sub_id,
         )
+        if customer_id:
+            await _update_profile_status(conn, customer_id, "canceled")
 
     logger.info("Subscription %s canceled", sub_id)
 
@@ -151,12 +159,7 @@ async def _handle_payment_failed(invoice: dict) -> None:
         return
 
     pool = await get_pool()
-    await pool.execute(
-        """
-        UPDATE profiles SET subscription_status = 'past_due', updated_at = now()
-        WHERE stripe_customer_id = $1
-        """,
-        customer_id,
-    )
+    async with pool.acquire() as conn, conn.transaction():
+        await _update_profile_status(conn, customer_id, "past_due")
 
     logger.info("Payment failed for customer %s", customer_id)

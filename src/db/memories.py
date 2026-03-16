@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import uuid
 from typing import Any
 
@@ -10,6 +12,8 @@ import numpy as np
 
 from src.db.connection import get_pool
 from src.db.utils import parse_uuid
+
+logger = logging.getLogger("mcp-brain")
 
 
 async def create_memory(
@@ -121,9 +125,17 @@ async def search_memories(
 
     results = [dict(row) for row in rows]
 
-    # Track access on returned memories (fire-and-forget)
+    # Track access on returned memories (true fire-and-forget — don't block response)
     if results:
         memory_ids = [row["id"] for row in rows]
+        _task = asyncio.create_task(_update_access_counts(pool, memory_ids))  # noqa: RUF006
+
+    return results
+
+
+async def _update_access_counts(pool, memory_ids: list) -> None:
+    """Background task to update access counts. Errors are logged, never raised."""
+    try:
         await pool.execute(
             """
             UPDATE memories
@@ -132,8 +144,8 @@ async def search_memories(
             """,
             memory_ids,
         )
-
-    return results
+    except Exception:
+        logger.warning("Failed to update access counts", exc_info=True)
 
 
 async def list_memories(
@@ -248,7 +260,6 @@ async def find_similar(
 
 async def get_memory_stats(user_id: str, bank_id: str) -> dict[str, Any]:
     """Get memory statistics for a user within a specific bank."""
-    from src.db.utils import parse_uuid
 
     try:
         user_uuid = parse_uuid(user_id, "user_id")
