@@ -5,6 +5,8 @@ import os
 
 from dotenv import load_dotenv
 
+from src.models import EntityType, MemorySource, MemoryType
+
 load_dotenv()
 
 logger = logging.getLogger("mcp-brain")
@@ -47,23 +49,15 @@ MAX_METADATA_LENGTH = int(os.environ.get("MAX_METADATA_LENGTH", "10000"))
 MAX_BANKS_FREE = int(os.environ.get("MAX_BANKS_FREE", "10"))
 MAX_BANKS_PAID = int(os.environ.get("MAX_BANKS_PAID", "50"))
 
-# Input validation
-VALID_MEMORY_TYPES = {
-    "observation",
-    "task",
-    "idea",
-    "reference",
-    "person_note",
-    "decision",
-    "preference",
-}
-VALID_SOURCES = {"mcp", "slack", "manual", "import"}
+# Input validation — derived from Pydantic enums in src/models.py (single source of truth)
+VALID_MEMORY_TYPES = {e.value for e in MemoryType}
+VALID_SOURCES = {e.value for e in MemorySource}
+VALID_ENTITY_TYPES = {e.value for e in EntityType}
 MAX_TAGS = 20
 MAX_TAG_LENGTH = 100
 MAX_BANK_NAME_LENGTH = 100
 MAX_BANK_SLUG_LENGTH = 50
 MAX_QUERY_LENGTH = 10000  # ~10KB search query limit
-VALID_ENTITY_TYPES = {"person", "organization", "place", "project", "topic"}
 DUPLICATE_SIMILARITY_THRESHOLD = 0.90
 
 # Stripe
