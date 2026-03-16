@@ -112,3 +112,57 @@ class TestIsSubscriptionActive:
             result = await is_subscription_active(VALID_USER_ID)
 
         assert result is False
+
+
+# ===== get_user_limits =====
+
+
+class TestGetUserLimits:
+    async def test_returns_paid_true_and_count_for_active_subscription(self):
+        from src.db.profiles import get_user_limits
+
+        mock_pool = AsyncMock()
+        mock_pool.fetchrow = AsyncMock(
+            return_value={"subscription_status": "active", "memory_count": 250}
+        )
+
+        with _patch_pool(mock_pool):
+            is_paid, count = await get_user_limits(VALID_USER_ID)
+
+        assert is_paid is True
+        assert count == 250
+
+    async def test_returns_paid_false_for_free_user(self):
+        from src.db.profiles import get_user_limits
+
+        mock_pool = AsyncMock()
+        mock_pool.fetchrow = AsyncMock(
+            return_value={"subscription_status": "free", "memory_count": 10}
+        )
+
+        with _patch_pool(mock_pool):
+            is_paid, count = await get_user_limits(VALID_USER_ID)
+
+        assert is_paid is False
+        assert count == 10
+
+    async def test_returns_defaults_for_invalid_uuid(self):
+        from src.db.profiles import get_user_limits
+
+        # get_user_limits validates UUID before calling get_pool
+        is_paid, count = await get_user_limits("not-a-uuid")
+
+        assert is_paid is False
+        assert count == 0
+
+    async def test_returns_defaults_for_missing_profile(self):
+        from src.db.profiles import get_user_limits
+
+        mock_pool = AsyncMock()
+        mock_pool.fetchrow = AsyncMock(return_value=None)
+
+        with _patch_pool(mock_pool):
+            is_paid, count = await get_user_limits(VALID_USER_ID)
+
+        assert is_paid is False
+        assert count == 0

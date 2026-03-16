@@ -401,3 +401,190 @@ class TestGetMemoryStats:
         # get_memory_stats validates UUIDs before calling get_pool
         result = await get_memory_stats(user_id="not-uuid", bank_id=VALID_BANK_ID)
         assert result == {"total_memories": 0}
+
+
+# ===== find_similar =====
+
+
+class TestFindSimilar:
+    async def test_find_similar_returns_matches_above_threshold(self):
+        from src.db.memories import find_similar
+
+        fake_rows = [
+            {
+                "id": uuid.uuid4(),
+                "content": "similar memory",
+                "memory_type": "observation",
+                "tags": ["test"],
+                "created_at": datetime.utcnow(),
+                "similarity": 0.92,
+            },
+        ]
+        mock_pool = AsyncMock()
+        mock_pool.fetch = AsyncMock(return_value=fake_rows)
+
+        with _patch_pool(mock_pool):
+            results = await find_similar(
+                user_id=VALID_USER_ID,
+                bank_id=VALID_BANK_ID,
+                embedding=FAKE_EMBEDDING,
+                threshold=0.85,
+                limit=5,
+            )
+
+        assert len(results) == 1
+        assert results[0]["similarity"] == 0.92
+        assert results[0]["content"] == "similar memory"
+
+    async def test_find_similar_returns_empty_for_no_matches(self):
+        from src.db.memories import find_similar
+
+        mock_pool = AsyncMock()
+        mock_pool.fetch = AsyncMock(return_value=[])
+
+        with _patch_pool(mock_pool):
+            results = await find_similar(
+                user_id=VALID_USER_ID,
+                bank_id=VALID_BANK_ID,
+                embedding=FAKE_EMBEDDING,
+                threshold=0.99,
+            )
+
+        assert results == []
+
+    async def test_find_similar_returns_empty_for_invalid_uuid(self):
+        from src.db.memories import find_similar
+
+        # find_similar validates UUIDs before calling get_pool
+        results = await find_similar(
+            user_id="bad-uuid",
+            bank_id=VALID_BANK_ID,
+            embedding=FAKE_EMBEDDING,
+        )
+
+        assert results == []
+
+    async def test_find_similar_excludes_archived(self):
+        from src.db.memories import find_similar
+
+        mock_pool = AsyncMock()
+        mock_pool.fetch = AsyncMock(return_value=[])
+
+        with _patch_pool(mock_pool):
+            await find_similar(
+                user_id=VALID_USER_ID,
+                bank_id=VALID_BANK_ID,
+                embedding=FAKE_EMBEDDING,
+            )
+
+        call_sql = mock_pool.fetch.call_args.args[0]
+        assert "archived_at IS NULL" in call_sql
+
+
+# ===== batch_create_memories =====
+
+
+class TestBatchCreateMemories:
+    async def test_batch_creates_multiple_memories(self):
+        from src.db.memories import batch_create_memories
+
+        id1, id2 = uuid.uuid4(), uuid.uuid4()
+        pool, conn = _make_transactional_pool()
+        conn.fetchrow = AsyncMock(side_effect=[{"id": id1}, {"id": id2}])
+
+        items = [
+            ("memory one", FAKE_EMBEDDING, {"key": "val"}, "observation", ["tag1"], "mcp"),
+            ("memory two", FAKE_EMBEDDING, None, "task", None, "api"),
+        ]
+
+        with _patch_pool(pool):
+            result = await batch_create_memories(
+                user_id=VALID_USER_ID,
+                bank_id=VALID_BANK_ID,
+                items=items,
+            )
+
+        assert len(result) == 2
+        assert str(id1) in result
+        assert str(id2) in result
+        assert conn.fetchrow.call_count == 2
+
+    async def test_batch_respects_memory_limit(self):
+        from src.db.memories import batch_create_memories
+
+        pool, conn = _make_transactional_pool()
+        # Limit check returns count at capacity — adding 2 items would exceed limit of 100
+        conn.fetchrow = AsyncMock(return_value={"memory_count": 99})
+
+        items = [
+            ("memory one", FAKE_EMBEDDING, None, "observation", None, "mcp"),
+            ("memory two", FAKE_EMBEDDING, None, "observation", None, "mcp"),
+        ]
+
+        with _patch_pool(pool):
+            result = await batch_create_memories(
+                user_id=VALID_USER_ID,
+                bank_id=VALID_BANK_ID,
+                items=items,
+                memory_limit=100,
+            )
+
+        assert result == []
+
+    async def test_batch_returns_empty_for_no_items(self):
+        from src.db.memories import batch_create_memories
+
+        # Empty items list returns early without touching the pool
+        result = await batch_create_memories(
+            user_id=VALID_USER_ID,
+            bank_id=VALID_BANK_ID,
+            items=[],
+        )
+
+        assert result == []
+
+    async def test_batch_returns_empty_for_invalid_uuid(self):
+        from src.db.memories import batch_create_memories
+
+        items = [
+            ("memory", FAKE_EMBEDDING, None, "observation", None, "mcp"),
+        ]
+
+        # batch_create_memories validates UUIDs before calling get_pool
+        result = await batch_create_memories(
+            user_id="bad-uuid",
+            bank_id=VALID_BANK_ID,
+            items=items,
+        )
+
+        assert result == []
+
+
+# ===== _update_access_counts =====
+
+
+class TestUpdateAccessCounts:
+    async def test_updates_access_counts_for_memory_ids(self):
+        from src.db.memories import _update_access_counts
+
+        mock_pool = AsyncMock()
+        mock_pool.execute = AsyncMock(return_value="UPDATE 3")
+
+        memory_ids = [uuid.uuid4(), uuid.uuid4(), uuid.uuid4()]
+
+        await _update_access_counts(mock_pool, memory_ids)
+
+        mock_pool.execute.assert_called_once()
+        call_sql = mock_pool.execute.call_args.args[0]
+        assert "access_count" in call_sql
+        assert "last_accessed_at" in call_sql
+        assert mock_pool.execute.call_args.args[1] == memory_ids
+
+    async def test_logs_warning_on_failure(self):
+        from src.db.memories import _update_access_counts
+
+        mock_pool = AsyncMock()
+        mock_pool.execute = AsyncMock(side_effect=Exception("connection lost"))
+
+        # Should not raise — errors are caught and logged
+        await _update_access_counts(mock_pool, [uuid.uuid4()])
