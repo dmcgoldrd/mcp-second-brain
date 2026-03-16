@@ -258,6 +258,70 @@ async def find_similar(
     return [dict(row) for row in rows]
 
 
+async def batch_create_memories(
+    user_id: str,
+    bank_id: str,
+    items: list[tuple[str, list[float], dict[str, Any] | None, str, list[str] | None, str]],
+    memory_limit: int | None = None,
+) -> list[str]:
+    """Insert multiple memories in a single transaction.
+
+    Each item is a tuple of (content, embedding, metadata, memory_type, tags, source).
+    Returns list of created memory UUIDs as strings.
+
+    If memory_limit is provided, atomically checks the user's memory_count
+    against the limit before inserting.
+    """
+    if not items:
+        return []
+
+    try:
+        user_uuid = parse_uuid(user_id, "user_id")
+        bank_uuid = parse_uuid(bank_id, "bank_id")
+    except ValueError:
+        return []
+
+    pool = await get_pool()
+    created_ids: list[str] = []
+
+    async with pool.acquire() as conn, conn.transaction():
+        # Atomic limit check if memory_limit provided
+        if memory_limit is not None:
+            row = await conn.fetchrow(
+                "SELECT memory_count FROM profiles WHERE id = $1::uuid FOR UPDATE",
+                user_uuid,
+            )
+            count = row["memory_count"] if row else 0
+            if count + len(items) > memory_limit:
+                return []  # Would exceed limit
+
+        for content, embedding, metadata, memory_type, tags, source in items:
+            memory_uuid = uuid.uuid4()
+            embedding_array = np.array(embedding, dtype=np.float32)
+
+            row = await conn.fetchrow(
+                """
+                INSERT INTO memories
+                    (id, user_id, bank_id, content, embedding, metadata, memory_type, tags, source)
+                VALUES ($1, $2::uuid, $3::uuid, $4, $5, $6::jsonb, $7, $8, $9)
+                RETURNING id
+                """,
+                memory_uuid,
+                user_uuid,
+                bank_uuid,
+                content,
+                embedding_array,
+                json.dumps(metadata or {}),
+                memory_type,
+                tags or [],
+                source,
+            )
+            if row:
+                created_ids.append(str(row["id"]))
+
+    return created_ids
+
+
 async def get_memory_stats(user_id: str, bank_id: str) -> dict[str, Any]:
     """Get memory statistics for a user within a specific bank."""
 

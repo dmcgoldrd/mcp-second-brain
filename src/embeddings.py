@@ -23,3 +23,23 @@ async def generate_embedding(text: str) -> list[float]:
         dimensions=EMBEDDING_DIMENSIONS,
     )
     return response.data[0].embedding
+
+
+async def generate_embeddings(texts: list[str]) -> list[list[float]]:
+    """Generate embeddings for multiple texts in one API call.
+
+    OpenAI's embeddings endpoint natively supports batch input.
+    Returns embeddings in the same order as the input texts.
+    """
+    if not texts:
+        return []
+
+    client = _get_client()
+    response = await client.embeddings.create(
+        model=EMBEDDING_MODEL,
+        input=texts,
+        dimensions=EMBEDDING_DIMENSIONS,
+    )
+    # OpenAI returns data sorted by index, but sort explicitly to be safe
+    sorted_data = sorted(response.data, key=lambda d: d.index)
+    return [d.embedding for d in sorted_data]

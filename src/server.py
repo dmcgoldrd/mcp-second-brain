@@ -38,6 +38,9 @@ from src.db.profiles import is_subscription_active
 from src.ratelimit import tool_limiter
 from src.tools import memory_tools
 
+VALID_ENTITY_TYPES = {"person", "organization", "place", "project", "topic"}
+MAX_IMPORT_BATCH_SIZE = 100
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("mcp-brain")
 
@@ -418,3 +421,174 @@ async def create_bank(
         },
         indent=2,
     )
+
+
+@mcp.tool()
+async def get_entities(
+    query: Annotated[str | None, "Search entity names"] = None,
+    entity_type: Annotated[
+        str | None,
+        "Filter by type: person, organization, place, project, topic",
+    ] = None,
+    entity_name: Annotated[
+        str | None,
+        "Get all memories linked to this exact entity name",
+    ] = None,
+    token: AccessToken = CurrentAccessToken(),
+) -> str:
+    """List known entities and their associated facts from your Personal Brain.
+
+    Entities are people, organizations, places, projects, and topics extracted
+    from your memories. Search by name, filter by type, or get all memories
+    linked to a specific entity.
+    """
+    auth = await _resolve_auth(token)
+
+    # Validate entity_type if provided
+    if entity_type and entity_type not in VALID_ENTITY_TYPES:
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "invalid_entity_type",
+                "message": "Invalid entity type. Must be one of: "
+                + ", ".join(sorted(VALID_ENTITY_TYPES)),
+            }
+        )
+
+    # If entity_name is provided, return linked memories
+    if entity_name:
+        results = await memory_tools.get_entity_memories(
+            user_id=auth["user_id"],
+            bank_id=auth["bank_id"],
+            entity_name=entity_name,
+        )
+        return json.dumps(
+            {"entity_name": entity_name, "memories": results},
+            indent=2,
+            default=str,
+        )
+
+    # Otherwise, list/search entities
+    results = await memory_tools.get_entities(
+        user_id=auth["user_id"],
+        bank_id=auth["bank_id"],
+        query=query,
+        entity_type=entity_type,
+    )
+    return json.dumps(results, indent=2, default=str)
+
+
+@mcp.tool()
+async def import_memories(
+    memories: Annotated[
+        str,
+        "JSON array of memories to import. Each object: "
+        '{"content": "...", "memory_type?": "...", "tags?": [...], "metadata?": {...}}',
+    ],
+    deduplicate: Annotated[
+        bool,
+        "Check for duplicates before importing (cosine > 0.90 skipped)",
+    ] = True,
+    token: AccessToken = CurrentAccessToken(),
+) -> str:
+    """Import multiple memories at once into your Personal Brain.
+
+    Accepts a JSON array of memory objects. Each must have a 'content' field.
+    Optional fields: memory_type, tags, metadata. Memories are embedded in batch,
+    optionally deduplicated, and inserted in a single transaction.
+
+    Maximum 100 memories per call.
+    """
+    auth = await _resolve_auth(token)
+
+    # Parse the JSON string
+    try:
+        memory_list = json.loads(memories)
+    except json.JSONDecodeError:
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "invalid_json",
+                "message": "memories must be a valid JSON array.",
+            }
+        )
+
+    if not isinstance(memory_list, list):
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "invalid_format",
+                "message": "memories must be a JSON array.",
+            }
+        )
+
+    # Batch size limit
+    if len(memory_list) > MAX_IMPORT_BATCH_SIZE:
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "batch_too_large",
+                "message": f"Maximum {MAX_IMPORT_BATCH_SIZE} memories per import call.",
+            }
+        )
+
+    if len(memory_list) == 0:
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "empty_batch",
+                "message": "No memories to import.",
+            }
+        )
+
+    # Validate each memory has content
+    for i, m in enumerate(memory_list):
+        if not isinstance(m, dict) or not m.get("content", "").strip():
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": "invalid_memory",
+                    "message": f"Memory at index {i} is missing required 'content' field.",
+                }
+            )
+
+        # Validate content length
+        if len(m["content"].encode("utf-8")) > MAX_CONTENT_LENGTH:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": "content_too_long",
+                    "message": (
+                        f"Memory at index {i} exceeds {MAX_CONTENT_LENGTH} byte content limit."
+                    ),
+                }
+            )
+
+        # Validate memory_type if provided
+        if m.get("memory_type") and m["memory_type"] not in VALID_MEMORY_TYPES:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": "invalid_memory_type",
+                    "message": f"Memory at index {i} has invalid memory_type. Must be one of: "
+                    + ", ".join(sorted(VALID_MEMORY_TYPES)),
+                }
+            )
+
+        # Validate tags if provided
+        if m.get("tags") and len(m["tags"]) > MAX_TAGS:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "error": "too_many_tags",
+                    "message": f"Memory at index {i} has more than {MAX_TAGS} tags.",
+                }
+            )
+
+    result = await memory_tools.import_memories(
+        user_id=auth["user_id"],
+        bank_id=auth["bank_id"],
+        memories=memory_list,
+        deduplicate=deduplicate,
+    )
+    return json.dumps(result, indent=2, default=str)

@@ -7,6 +7,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from src.config import HOST, PORT
+from src.consolidation_endpoint import consolidation_handler
 from src.server import mcp
 from src.stripe_webhook import stripe_webhook_handler
 
@@ -17,8 +18,9 @@ def create_app():
     """Create the combined ASGI app: MCP server + Stripe webhook + static frontend."""
     app = mcp.http_app(transport="streamable-http")
 
-    # Stripe webhook endpoint (must come before static file mount)
+    # API endpoints (must come before static file mount)
     app.routes.insert(0, Route("/api/stripe/webhook", stripe_webhook_handler, methods=["POST"]))
+    app.routes.insert(0, Route("/api/consolidate", consolidation_handler, methods=["POST"]))
 
     # Mount frontend static files if the dist directory exists
     if os.path.isdir(FRONTEND_DIR):
