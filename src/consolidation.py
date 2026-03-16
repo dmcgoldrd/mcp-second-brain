@@ -334,10 +334,12 @@ async def _classify_conflict(
             max_tokens=10,
             temperature=0,
         )
-        answer = response.choices[0].message.content.strip().upper()
+        raw_content = response.choices[0].message.content
+        if not raw_content:
+            return "KEEP_BOTH"
+        answer = raw_content.strip().upper()
         if answer in ("UPDATE", "KEEP_BOTH"):
             return answer
-        # Default to KEEP_BOTH on unexpected output — conservative approach
         logger.warning("Unexpected LLM classification: %s — defaulting to KEEP_BOTH", answer)
         return "KEEP_BOTH"
     except Exception:
@@ -519,7 +521,10 @@ async def _extract_entities_batch(
             temperature=0,
             response_format={"type": "json_object"},
         )
-        raw = response.choices[0].message.content.strip()
+        raw_content = response.choices[0].message.content
+        if not raw_content:
+            return [[] for _ in memories]
+        raw = raw_content.strip()
         parsed = json.loads(raw)
 
         # The response might be {"entities": [[...]]} or just [[...]]

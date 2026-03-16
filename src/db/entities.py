@@ -52,8 +52,7 @@ async def get_entities(
         params.append(entity_type)
         param_idx += 1
 
-    conditions.append("TRUE")  # always-true tail for cleaner SQL
-    where = " AND ".join(conditions[:-1])  # drop the trailing TRUE
+    where = " AND ".join(conditions)
 
     params.append(limit)
 
