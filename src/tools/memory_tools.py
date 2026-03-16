@@ -282,7 +282,20 @@ async def get_entities(
         query=query,
         entity_type=entity_type,
     )
-    return [Entity.model_validate(row).to_mcp_response() for row in results]
+    serialized = []
+    for row in results:
+        r = dict(row)
+        # asyncpg returns JSONB as strings — parse if needed
+        if isinstance(r.get("facts"), str):
+            import json as _json
+
+            r["facts"] = _json.loads(r["facts"])
+        if isinstance(r.get("metadata"), str):
+            import json as _json
+
+            r["metadata"] = _json.loads(r["metadata"])
+        serialized.append(Entity.model_validate(r).to_mcp_response())
+    return serialized
 
 
 async def get_entity_memories(

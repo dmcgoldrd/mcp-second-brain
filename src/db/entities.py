@@ -57,7 +57,8 @@ async def get_entities(
     params.append(limit)
 
     sql = f"""
-        SELECT id, entity_name, entity_type, facts, memory_ids, metadata, created_at, updated_at
+        SELECT id, user_id, bank_id, entity_name, entity_type,
+               facts, memory_ids, metadata, created_at, updated_at
         FROM memory_entities
         WHERE {where}
         ORDER BY updated_at DESC
