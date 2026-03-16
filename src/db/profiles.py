@@ -6,6 +6,7 @@ from typing import Any
 
 from src.db.connection import get_pool
 from src.db.utils import parse_uuid
+from src.models import SubscriptionStatus
 
 
 async def get_profile(user_id: str) -> dict[str, Any] | None:
@@ -54,7 +55,7 @@ async def is_subscription_active(user_id: str) -> bool:
         "SELECT subscription_status FROM profiles WHERE id = $1::uuid",
         user_uuid,
     )
-    return row["subscription_status"] == "active" if row else False
+    return row["subscription_status"] == SubscriptionStatus.ACTIVE if row else False
 
 
 async def get_user_limits(user_id: str) -> tuple[bool, int]:
@@ -71,4 +72,4 @@ async def get_user_limits(user_id: str) -> tuple[bool, int]:
     )
     if not row:
         return False, 0
-    return row["subscription_status"] == "active", row["memory_count"]
+    return row["subscription_status"] == SubscriptionStatus.ACTIVE, row["memory_count"]

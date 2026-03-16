@@ -10,6 +10,7 @@ from src.db import memories as db
 from src.db.profiles import get_user_limits
 from src.embeddings import generate_embedding, generate_embeddings
 from src.metadata import classify_memory_type, extract_metadata
+from src.models import Entity, MemoryConflict, MemoryImportResult
 from src.ratelimit import embedding_limiter
 
 SIMILARITY_THRESHOLD = 0.85
@@ -104,16 +105,17 @@ async def create_memory(
 
     # Include conflicts if any similar memories were found
     if similar:
-        response["conflicts"] = [
-            {
-                "memory_id": str(s["id"]),
-                "content": s["content"],
-                "similarity": round(float(s["similarity"]), 3),
-                "memory_type": s.get("memory_type", "observation"),
-                "created_at": s["created_at"].isoformat() if s.get("created_at") else None,
-            }
+        conflicts_list = [
+            MemoryConflict(
+                memory_id=s["id"],
+                content=s["content"],
+                similarity=round(float(s["similarity"]), 3),
+                memory_type=s.get("memory_type", "observation"),
+                created_at=s.get("created_at"),
+            )
             for s in similar
         ]
+        response["conflicts"] = [c.model_dump(mode="json") for c in conflicts_list]
 
     return response
 
@@ -220,18 +222,7 @@ async def get_entities(
         query=query,
         entity_type=entity_type,
     )
-    return [
-        {
-            "id": str(row["id"]),
-            "entity_name": row["entity_name"],
-            "entity_type": row["entity_type"],
-            "facts": row.get("facts", []),
-            "memory_ids": [str(mid) for mid in row.get("memory_ids", [])],
-            "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
-            "updated_at": row["updated_at"].isoformat() if row.get("updated_at") else None,
-        }
-        for row in results
-    ]
+    return [Entity.model_validate(row).to_mcp_response() for row in results]
 
 
 async def get_entity_memories(
@@ -331,13 +322,11 @@ async def import_memories(
         memory_limit=memory_limit,
     )
 
-    result: dict[str, Any] = {
-        "status": "imported",
-        "created": len(created_ids),
-        "skipped": skipped,
-        "memory_ids": created_ids,
-    }
-    if conflicts:
-        result["conflicts"] = conflicts
+    import_result = MemoryImportResult(
+        created=len(created_ids),
+        skipped=skipped,
+        memory_ids=created_ids,
+        conflicts=conflicts,
+    )
 
-    return result
+    return import_result.model_dump(mode="json")
