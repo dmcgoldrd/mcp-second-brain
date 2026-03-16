@@ -63,6 +63,8 @@ MAX_TAG_LENGTH = 100
 MAX_BANK_NAME_LENGTH = 100
 MAX_BANK_SLUG_LENGTH = 50
 MAX_QUERY_LENGTH = 10000  # ~10KB search query limit
+VALID_ENTITY_TYPES = {"person", "organization", "place", "project", "topic"}
+DUPLICATE_SIMILARITY_THRESHOLD = 0.90
 
 # Stripe
 STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")

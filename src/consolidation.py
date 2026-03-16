@@ -10,17 +10,19 @@ Implements a 5-phase pipeline inspired by human memory consolidation:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from openai import AsyncOpenAI
+if TYPE_CHECKING:
+    from openai import AsyncOpenAI
 
-from src.config import OPENAI_API_KEY
 from src.db.connection import get_pool
 from src.db.utils import parse_uuid
+from src.embeddings import get_openai_client
 
 logger = logging.getLogger("mcp-brain")
 
@@ -34,16 +36,8 @@ _CONFLICT_SIMILARITY_HIGH = 0.90
 _ARCHIVE_SCORE_THRESHOLD = 0.1
 _ARCHIVE_AGE_DAYS = 90
 _ENTITY_BATCH_SIZE = 10
-
-_openai_client: AsyncOpenAI | None = None
-
-
-def _get_openai_client() -> AsyncOpenAI:
-    """Lazy singleton for the OpenAI client (same pattern as src/embeddings.py)."""
-    global _openai_client
-    if _openai_client is None:
-        _openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
-    return _openai_client
+_LLM_CONCURRENCY = 10  # max concurrent LLM calls
+_USER_CONCURRENCY = 5  # max concurrent user consolidations
 
 
 # ---------------------------------------------------------------------------
@@ -131,6 +125,7 @@ async def _phase_duplicate_merge(
           AND b.embedding IS NOT NULL
           AND 1 - (a.embedding <=> b.embedding) > $3
         ORDER BY similarity DESC
+        LIMIT 500
         """,
         user_uuid,
         bank_uuid,
@@ -241,20 +236,28 @@ async def _phase_conflict_resolution(
     if not rows:
         return 0
 
-    client = _get_openai_client()
+    client = get_openai_client()
+
+    # Parallelize LLM calls with a semaphore to avoid overwhelming the API
+    sem = asyncio.Semaphore(_LLM_CONCURRENCY)
+
+    async def classify_one(row):
+        async with sem:
+            classification = await _classify_conflict(
+                client,
+                content_a=row["content_a"],
+                content_b=row["content_b"],
+                created_a=row["created_a"],
+                created_b=row["created_b"],
+            )
+            return row, classification
+
+    results = await asyncio.gather(*[classify_one(r) for r in rows])
+
+    # Now apply the results sequentially (DB writes need ordered execution)
     resolved_count = 0
-
-    for row in rows:
-        classification = await _classify_conflict(
-            client,
-            content_a=row["content_a"],
-            content_b=row["content_b"],
-            created_a=row["created_a"],
-            created_b=row["created_b"],
-        )
-
+    for row, classification in results:
         if classification == "UPDATE":
-            # Archive the older memory, keep the newer one
             if row["created_a"] <= row["created_b"]:
                 older_id, newer_id = row["id_a"], row["id_b"]
             else:
@@ -287,7 +290,6 @@ async def _phase_conflict_resolution(
                 },
             )
         else:
-            # KEEP_BOTH — just log the decision
             await _log_action(
                 conn,
                 user_uuid,
@@ -386,7 +388,7 @@ async def _phase_entity_extraction(
     if not rows:
         return 0
 
-    client = _get_openai_client()
+    client = get_openai_client()
     total_entities = 0
 
     # Process in batches
@@ -741,16 +743,31 @@ async def consolidate_all_active_users() -> dict:
     # Track which user_ids we've consolidated (for updating last_consolidation_at)
     consolidated_user_ids: set[uuid.UUID] = set()
 
-    for row in rows:
-        user_id = str(row["user_id"])
-        bank_id = str(row["bank_id"])
+    # Parallelize user consolidation with bounded concurrency
+    sem = asyncio.Semaphore(_USER_CONCURRENCY)
 
-        summary = await consolidate_user(user_id, bank_id)
+    async def process_one(row):
+        async with sem:
+            user_id = str(row["user_id"])
+            bank_id = str(row["bank_id"])
+            return row, await consolidate_user(user_id, bank_id)
+
+    user_results = await asyncio.gather(*[process_one(r) for r in rows], return_exceptions=True)
+
+    for item in user_results:
+        if isinstance(item, Exception):
+            results["errors"].append({"error": str(item)})
+            continue
+        row, summary = item
         results["user_results"].append(summary)
 
         if summary.get("error"):
             results["errors"].append(
-                {"user_id": user_id, "bank_id": bank_id, "error": summary["error"]}
+                {
+                    "user_id": str(row["user_id"]),
+                    "bank_id": str(row["bank_id"]),
+                    "error": summary["error"],
+                }
             )
         else:
             results["users_processed"] += 1

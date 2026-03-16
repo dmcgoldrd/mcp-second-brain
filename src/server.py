@@ -30,6 +30,7 @@ from src.config import (
     MAX_TAG_LENGTH,
     MAX_TAGS,
     SUPABASE_URL,
+    VALID_ENTITY_TYPES,
     VALID_MEMORY_TYPES,
     VALID_SOURCES,
 )
@@ -38,7 +39,6 @@ from src.db.profiles import is_subscription_active
 from src.ratelimit import tool_limiter
 from src.tools import memory_tools
 
-VALID_ENTITY_TYPES = {"person", "organization", "place", "project", "topic"}
 MAX_IMPORT_BATCH_SIZE = 100
 
 logging.basicConfig(level=logging.INFO)

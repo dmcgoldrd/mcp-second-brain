@@ -7,7 +7,7 @@ from src.config import EMBEDDING_DIMENSIONS, EMBEDDING_MODEL, OPENAI_API_KEY
 _client: AsyncOpenAI | None = None
 
 
-def _get_client() -> AsyncOpenAI:
+def get_openai_client() -> AsyncOpenAI:
     global _client
     if _client is None:
         _client = AsyncOpenAI(api_key=OPENAI_API_KEY)
@@ -16,7 +16,7 @@ def _get_client() -> AsyncOpenAI:
 
 async def generate_embedding(text: str) -> list[float]:
     """Generate an embedding vector for the given text."""
-    client = _get_client()
+    client = get_openai_client()
     response = await client.embeddings.create(
         model=EMBEDDING_MODEL,
         input=text,
@@ -34,7 +34,7 @@ async def generate_embeddings(texts: list[str]) -> list[list[float]]:
     if not texts:
         return []
 
-    client = _get_client()
+    client = get_openai_client()
     response = await client.embeddings.create(
         model=EMBEDDING_MODEL,
         input=texts,

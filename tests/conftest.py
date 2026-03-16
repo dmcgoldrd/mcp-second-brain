@@ -76,7 +76,7 @@ def mock_openai_embedding():
     mock_client = AsyncMock()
     mock_client.embeddings.create = AsyncMock(return_value=response)
 
-    with patch("src.embeddings._get_client", return_value=mock_client):
+    with patch("src.embeddings.get_openai_client", return_value=mock_client):
         yield mock_client
 
 

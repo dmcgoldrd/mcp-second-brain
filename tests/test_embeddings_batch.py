@@ -27,7 +27,7 @@ class TestGenerateEmbeddings:
         mock_client = AsyncMock()
         mock_client.embeddings.create = AsyncMock(return_value=response)
 
-        with patch("src.embeddings._get_client", return_value=mock_client):
+        with patch("src.embeddings.get_openai_client", return_value=mock_client):
             result = await generate_embeddings(["text one", "text two"])
 
         assert isinstance(result, list)
@@ -45,7 +45,7 @@ class TestGenerateEmbeddings:
         # Empty input should return empty list without calling the API
         mock_client = AsyncMock()
 
-        with patch("src.embeddings._get_client", return_value=mock_client):
+        with patch("src.embeddings.get_openai_client", return_value=mock_client):
             result = await generate_embeddings([])
 
         assert result == []
@@ -74,7 +74,7 @@ class TestGenerateEmbeddings:
         mock_client = AsyncMock()
         mock_client.embeddings.create = AsyncMock(return_value=response)
 
-        with patch("src.embeddings._get_client", return_value=mock_client):
+        with patch("src.embeddings.get_openai_client", return_value=mock_client):
             result = await generate_embeddings(["a", "b", "c"])
 
         assert len(result) == 3

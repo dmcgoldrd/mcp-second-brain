@@ -48,8 +48,8 @@ def _patch_pool(mock_pool):
 
 
 def _patch_openai(mock_client):
-    """Return a context manager that patches _get_openai_client to return mock_client."""
-    return patch("src.consolidation._get_openai_client", return_value=mock_client)
+    """Return a context manager that patches get_openai_client to return mock_client."""
+    return patch("src.consolidation.get_openai_client", return_value=mock_client)
 
 
 def _make_openai_chat_response(content: str):

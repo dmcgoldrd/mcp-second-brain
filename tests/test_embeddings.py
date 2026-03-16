@@ -36,7 +36,7 @@ class TestGenerateEmbedding:
 
 class TestGetClient:
     def test_singleton_pattern(self):
-        """_get_client should return the same client on subsequent calls."""
+        """get_openai_client should return the same client on subsequent calls."""
         import src.embeddings
 
         # Reset singleton
@@ -46,8 +46,8 @@ class TestGetClient:
             mock_instance = MagicMock()
             mock_cls.return_value = mock_instance
 
-            client1 = src.embeddings._get_client()
-            client2 = src.embeddings._get_client()
+            client1 = src.embeddings.get_openai_client()
+            client2 = src.embeddings.get_openai_client()
 
             assert client1 is client2
             # Constructor called only once
@@ -62,7 +62,7 @@ class TestGetClient:
         src.embeddings._client = None
 
         with patch("src.embeddings.AsyncOpenAI") as mock_cls:
-            src.embeddings._get_client()
+            src.embeddings.get_openai_client()
             mock_cls.assert_called_once()
             call_kwargs = mock_cls.call_args
             assert "api_key" in call_kwargs.kwargs
