@@ -454,9 +454,6 @@ def store_memories(facts: list[dict]) -> int:
                         "Server rejected memory: %s",
                         result.get("message", result.get("error", "unknown")),
                     )
-                else:
-                    # Unknown status but no error -- count as stored
-                    stored += 1
 
             except Exception as exc:
                 logger.error(

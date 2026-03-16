@@ -16,6 +16,9 @@ from src.db.utils import parse_uuid
 
 logger = logging.getLogger("mcp-brain")
 
+# Prevent GC of fire-and-forget background tasks
+_background_tasks: set[asyncio.Task] = set()
+
 
 async def create_memory(
     user_id: str,
@@ -129,7 +132,9 @@ async def search_memories(
     # Track access on returned memories (true fire-and-forget — don't block response)
     if results:
         memory_ids = [row["id"] for row in rows]
-        _task = asyncio.create_task(_update_access_counts(pool, memory_ids))  # noqa: RUF006
+        task = asyncio.create_task(_update_access_counts(pool, memory_ids))
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
 
     return results
 
@@ -193,7 +198,9 @@ async def search_memories_at(
     # Track access on returned memories (true fire-and-forget)
     if results:
         memory_ids = [row["id"] for row in rows]
-        _task = asyncio.create_task(_update_access_counts(pool, memory_ids))  # noqa: RUF006
+        task = asyncio.create_task(_update_access_counts(pool, memory_ids))
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
 
     return results
 

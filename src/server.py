@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from datetime import UTC
 from typing import Annotated
 
 from fastmcp import FastMCP
@@ -262,6 +263,9 @@ async def search_memories(
 
         try:
             parsed_as_of = datetime.fromisoformat(as_of.replace("Z", "+00:00"))
+            # Enforce timezone awareness — naive datetimes cause wrong results
+            if parsed_as_of.tzinfo is None:
+                parsed_as_of = parsed_as_of.replace(tzinfo=UTC)
         except ValueError:
             return json.dumps(
                 {
@@ -352,6 +356,16 @@ async def update_memory(
     auth = await _resolve_auth(token)
 
     # Validate content length if provided
+    # Check that at least one field is provided
+    if content is None and memory_type is None and tags is None and metadata is None:
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "no_fields",
+                "message": "At least one field must be provided.",
+            }
+        )
+
     if content is not None:
         if not content.strip():
             return json.dumps(
