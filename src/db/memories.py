@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 
 from src.db.connection import get_pool
+from src.db.utils import parse_uuid
 
 
 async def create_memory(
@@ -28,8 +29,8 @@ async def create_memory(
     against the limit before inserting (F-05: prevents TOCTOU race).
     """
     try:
-        user_uuid = uuid.UUID(user_id)
-        bank_uuid = uuid.UUID(bank_id)
+        user_uuid = parse_uuid(user_id, "user_id")
+        bank_uuid = parse_uuid(bank_id, "bank_id")
     except ValueError:
         return {"error": "Invalid user ID or bank ID format"}
 
@@ -84,13 +85,12 @@ async def search_memories(
     embedding_array = np.array(query_embedding, dtype=np.float32)
 
     try:
-        user_uuid = uuid.UUID(user_id)
-        bank_uuid = uuid.UUID(bank_id)
+        user_uuid = parse_uuid(user_id, "user_id")
+        bank_uuid = parse_uuid(bank_id, "bank_id")
     except ValueError:
         return []
 
     if query_text:
-        # Hybrid search using the RRF function (with user_id and bank_id)
         rows = await pool.fetch(
             """
             SELECT id, content, metadata, memory_type, tags, source, created_at, score
@@ -103,13 +103,13 @@ async def search_memories(
             limit,
         )
     else:
-        # Pure semantic search
         rows = await pool.fetch(
             """
             SELECT id, content, metadata, memory_type, tags, source, created_at,
                    1 - (embedding <=> $1) AS score
             FROM memories
-            WHERE user_id = $2::uuid AND bank_id = $3::uuid AND embedding IS NOT NULL
+            WHERE user_id = $2::uuid AND bank_id = $3::uuid
+              AND embedding IS NOT NULL AND archived_at IS NULL
             ORDER BY embedding <=> $1
             LIMIT $4
             """,
@@ -119,7 +119,21 @@ async def search_memories(
             limit,
         )
 
-    return [dict(row) for row in rows]
+    results = [dict(row) for row in rows]
+
+    # Track access on returned memories (fire-and-forget)
+    if results:
+        memory_ids = [row["id"] for row in rows]
+        await pool.execute(
+            """
+            UPDATE memories
+            SET access_count = access_count + 1, last_accessed_at = now()
+            WHERE id = ANY($1::uuid[])
+            """,
+            memory_ids,
+        )
+
+    return results
 
 
 async def list_memories(
@@ -131,8 +145,8 @@ async def list_memories(
 ) -> list[dict[str, Any]]:
     """List memories for a user, most recent first."""
     try:
-        user_uuid = uuid.UUID(user_id)
-        bank_uuid = uuid.UUID(bank_id)
+        user_uuid = parse_uuid(user_id, "user_id")
+        bank_uuid = parse_uuid(bank_id, "bank_id")
     except ValueError:
         return []
 
@@ -144,6 +158,7 @@ async def list_memories(
             SELECT id, content, metadata, memory_type, tags, source, created_at
             FROM memories
             WHERE user_id = $1::uuid AND bank_id = $2::uuid AND memory_type = $3
+              AND archived_at IS NULL
             ORDER BY created_at DESC
             LIMIT $4 OFFSET $5
             """,
@@ -159,6 +174,7 @@ async def list_memories(
             SELECT id, content, metadata, memory_type, tags, source, created_at
             FROM memories
             WHERE user_id = $1::uuid AND bank_id = $2::uuid
+              AND archived_at IS NULL
             ORDER BY created_at DESC
             LIMIT $3 OFFSET $4
             """,
@@ -174,9 +190,9 @@ async def list_memories(
 async def delete_memory(user_id: str, bank_id: str, memory_id: str) -> bool:
     """Delete a specific memory. Returns True if deleted."""
     try:
-        user_uuid = uuid.UUID(user_id)
-        bank_uuid = uuid.UUID(bank_id)
-        memory_uuid = uuid.UUID(memory_id)
+        user_uuid = parse_uuid(user_id, "user_id")
+        bank_uuid = parse_uuid(bank_id, "bank_id")
+        memory_uuid = parse_uuid(memory_id, "memory_id")
     except ValueError:
         return False
 
@@ -193,11 +209,50 @@ async def delete_memory(user_id: str, bank_id: str, memory_id: str) -> bool:
     return result == "DELETE 1"
 
 
+async def find_similar(
+    user_id: str,
+    bank_id: str,
+    embedding: list[float],
+    threshold: float = 0.85,
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    """Find memories similar to the given embedding above a cosine threshold."""
+    try:
+        user_uuid = parse_uuid(user_id, "user_id")
+        bank_uuid = parse_uuid(bank_id, "bank_id")
+    except ValueError:
+        return []
+
+    pool = await get_pool()
+    embedding_array = np.array(embedding, dtype=np.float32)
+
+    rows = await pool.fetch(
+        """
+        SELECT id, content, memory_type, tags, created_at,
+               1 - (embedding <=> $1) AS similarity
+        FROM memories
+        WHERE user_id = $2::uuid AND bank_id = $3::uuid
+          AND embedding IS NOT NULL AND archived_at IS NULL
+          AND 1 - (embedding <=> $1) > $4
+        ORDER BY embedding <=> $1
+        LIMIT $5
+        """,
+        embedding_array,
+        user_uuid,
+        bank_uuid,
+        threshold,
+        limit,
+    )
+    return [dict(row) for row in rows]
+
+
 async def get_memory_stats(user_id: str, bank_id: str) -> dict[str, Any]:
     """Get memory statistics for a user within a specific bank."""
+    from src.db.utils import parse_uuid
+
     try:
-        user_uuid = uuid.UUID(user_id)
-        bank_uuid = uuid.UUID(bank_id)
+        user_uuid = parse_uuid(user_id, "user_id")
+        bank_uuid = parse_uuid(bank_id, "bank_id")
     except ValueError:
         return {"total_memories": 0}
 
@@ -205,15 +260,16 @@ async def get_memory_stats(user_id: str, bank_id: str) -> dict[str, Any]:
     row = await pool.fetchrow(
         """
         SELECT
-            COUNT(*) AS total_memories,
-            COUNT(DISTINCT memory_type) AS type_count,
-            MIN(created_at) AS oldest_memory,
-            MAX(created_at) AS newest_memory,
-            jsonb_object_agg(memory_type, type_count) AS type_breakdown
+            SUM(sub.type_count)::integer AS total_memories,
+            MIN(sub.min_created) AS oldest_memory,
+            MAX(sub.max_created) AS newest_memory,
+            jsonb_object_agg(sub.memory_type, sub.type_count) AS type_breakdown
         FROM (
-            SELECT memory_type, COUNT(*) AS type_count
+            SELECT memory_type, COUNT(*) AS type_count,
+                   MIN(created_at) AS min_created, MAX(created_at) AS max_created
             FROM memories
             WHERE user_id = $1::uuid AND bank_id = $2::uuid
+              AND archived_at IS NULL
             GROUP BY memory_type
         ) sub
         """,

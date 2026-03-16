@@ -15,23 +15,24 @@ VALID_MEMORY_ID = str(uuid.uuid4())
 
 
 def _enter_mock_deps(stack: ExitStack, memory_count: int = 0) -> None:
-    """Enter rate limiter, subscription, and memory count mocks into an ExitStack."""
+    """Enter rate limiter, subscription/limits, and find_similar mocks into an ExitStack."""
     mock_limiter = MagicMock()
     mock_limiter.check.return_value = True
     stack.enter_context(patch("src.tools.memory_tools.embedding_limiter", mock_limiter))
+    # Combined subscription + count query
     stack.enter_context(
         patch(
-            "src.tools.memory_tools.is_subscription_active",
+            "src.tools.memory_tools.get_user_limits",
             new_callable=AsyncMock,
-            return_value=False,
+            return_value=(False, memory_count),
         )
     )
-    # N-06: Pre-check calls get_memory_count before embedding
+    # On-write conflict detection returns no similar memories by default
     stack.enter_context(
         patch(
-            "src.tools.memory_tools.get_memory_count",
+            "src.tools.memory_tools.db.find_similar",
             new_callable=AsyncMock,
-            return_value=memory_count,
+            return_value=[],
         )
     )
 
@@ -254,14 +255,9 @@ class TestCreateMemory:
         with (
             patch("src.tools.memory_tools.embedding_limiter", mock_limiter),
             patch(
-                "src.tools.memory_tools.is_subscription_active",
+                "src.tools.memory_tools.get_user_limits",
                 new_callable=AsyncMock,
-                return_value=False,
-            ),
-            patch(
-                "src.tools.memory_tools.get_memory_count",
-                new_callable=AsyncMock,
-                return_value=0,
+                return_value=(False, 0),
             ),
         ):
             result = await create_memory(

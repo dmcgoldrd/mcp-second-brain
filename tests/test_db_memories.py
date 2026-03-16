@@ -92,7 +92,8 @@ class TestCreateMemory:
 
         call_args = conn.fetchrow.call_args
         # metadata arg (index 6 in positional args — query, id, user_uuid, bank_uuid, content, embedding, metadata)
-        assert call_args.args[6] == {}
+        # Passed as JSON string for $6::jsonb parameter
+        assert call_args.args[6] == "{}"
 
     async def test_defaults_tags_to_empty_list(self):
         from src.db.memories import create_memory
