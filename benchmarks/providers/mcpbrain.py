@@ -42,7 +42,7 @@ class MCPBrainProvider:
         self.base_url = (
             base_url or os.environ.get("MCPBRAIN_URL", "http://localhost:8080")
         ).rstrip("/")
-        self.mcp_url = f"{self.base_url}/mcp/"
+        self.mcp_url = f"{self.base_url}/mcp"
         self.token = token or os.environ["MCPBRAIN_TOKEN"]
         self.bank_slug = bank_slug or os.environ.get("MCPBRAIN_BANK")
         self.timeout = timeout
@@ -108,6 +108,17 @@ class MCPBrainProvider:
         self._initialized = True
         logger.info("MCP session initialized (session_id=%s)", self._session_id)
 
+    def _parse_sse_response(self, text: str) -> dict:
+        """Parse an SSE response to extract the JSON-RPC message."""
+        for line in text.splitlines():
+            if line.startswith("data: "):
+                try:
+                    return json.loads(line[6:])
+                except json.JSONDecodeError:
+                    continue
+        # Fallback: try parsing the whole response as JSON
+        return json.loads(text)
+
     async def _call_tool(self, tool_name: str, arguments: dict) -> dict:
         """Send a tools/call JSON-RPC request and return the parsed result."""
         await self._ensure_initialized()
@@ -126,7 +137,12 @@ class MCPBrainProvider:
         resp = await client.post(self.mcp_url, json=payload)
         resp.raise_for_status()
 
-        body = resp.json()
+        # Response may be SSE (text/event-stream) or plain JSON
+        content_type = resp.headers.get("content-type", "")
+        if "event-stream" in content_type:
+            body = self._parse_sse_response(resp.text)
+        else:
+            body = resp.json()
 
         # Handle JSON-RPC error
         if "error" in body:

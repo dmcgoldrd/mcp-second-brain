@@ -122,6 +122,7 @@ def f1_token_overlap(gold: str, predicted: str) -> float:
     return 2 * precision * recall / (precision + recall)
 
 
-def _tokenize(text: str) -> list[str]:
+def _tokenize(text: str | int | float) -> list[str]:
     """Lowercase and split on non-alphanumeric characters."""
+    text = str(text)
     return [t for t in re.split(r"[^a-z0-9]+", text.lower()) if t]
