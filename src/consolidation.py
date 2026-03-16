@@ -49,15 +49,25 @@ async def _phase_importance_scoring(
     conn,
     user_uuid: uuid.UUID,
     bank_uuid: uuid.UUID,
+    since: datetime | None = None,
 ) -> int:
-    """Score all active memories using recency decay and access frequency.
+    """Score memories that changed since last consolidation.
 
     Formula: score = (1.0 / (1 + days_since_created)) * (1 + 0.1 * access_count)
 
+    If since is None (first run), scores all active memories.
     Returns the number of memories scored.
     """
-    result = await conn.execute(
+    since_filter = ""
+    params: list = [user_uuid, bank_uuid]
+    if since:
+        since_filter = """
+          AND (created_at > $3 OR last_accessed_at > $3 OR importance_score = 0)
         """
+        params.append(since)
+
+    result = await conn.execute(
+        f"""
         UPDATE memories
         SET importance_score = (
             1.0 / (1 + EXTRACT(EPOCH FROM (now() - created_at)) / 86400.0)
@@ -65,9 +75,9 @@ async def _phase_importance_scoring(
         WHERE user_id = $1::uuid
           AND bank_id = $2::uuid
           AND archived_at IS NULL
+          {since_filter}
         """,
-        user_uuid,
-        bank_uuid,
+        *params,
     )
     count = int(result.split()[-1]) if result else 0
 
@@ -93,44 +103,76 @@ async def _phase_duplicate_merge(
     conn,
     user_uuid: uuid.UUID,
     bank_uuid: uuid.UUID,
+    since: datetime | None = None,
 ) -> int:
-    """Find and merge near-duplicate memories (cosine similarity > 0.90).
+    """Find and merge near-duplicate memories.
 
-    For each duplicate cluster, keep the memory with the highest importance_score
-    and archive the rest with superseded_by pointing to the survivor.
+    When since is provided, only checks NEW memories (created since last run)
+    against the full vault — avoids O(N^2) vault-vs-vault comparison. On first
+    run (since=None), does a full pairwise check with LIMIT 500.
 
     Returns the number of memories archived as duplicates.
     """
-    # Find duplicate pairs — self-join on high cosine similarity.
-    # We use (1 - cosine distance) > threshold.
-    # Only compare each pair once (a.id < b.id) to avoid double-counting.
-    rows = await conn.fetch(
-        """
-        SELECT
-            a.id AS id_a,
-            b.id AS id_b,
-            a.importance_score AS score_a,
-            b.importance_score AS score_b,
-            1 - (a.embedding <=> b.embedding) AS similarity
-        FROM memories a
-        JOIN memories b
-          ON a.user_id = b.user_id
-         AND a.bank_id = b.bank_id
-         AND a.id < b.id
-        WHERE a.user_id = $1::uuid
-          AND a.bank_id = $2::uuid
-          AND a.archived_at IS NULL
-          AND b.archived_at IS NULL
-          AND a.embedding IS NOT NULL
-          AND b.embedding IS NOT NULL
-          AND 1 - (a.embedding <=> b.embedding) > $3
-        ORDER BY similarity DESC
-        LIMIT 500
-        """,
-        user_uuid,
-        bank_uuid,
-        _DUPLICATE_SIMILARITY_THRESHOLD,
-    )
+    if since:
+        # Incremental: compare new memories (a) against ALL active memories (b)
+        rows = await conn.fetch(
+            """
+            SELECT
+                a.id AS id_a,
+                b.id AS id_b,
+                a.importance_score AS score_a,
+                b.importance_score AS score_b,
+                1 - (a.embedding <=> b.embedding) AS similarity
+            FROM memories a
+            JOIN memories b
+              ON a.user_id = b.user_id
+             AND a.bank_id = b.bank_id
+             AND a.id != b.id
+            WHERE a.user_id = $1::uuid
+              AND a.bank_id = $2::uuid
+              AND a.archived_at IS NULL
+              AND b.archived_at IS NULL
+              AND a.embedding IS NOT NULL
+              AND b.embedding IS NOT NULL
+              AND a.created_at > $3
+              AND 1 - (a.embedding <=> b.embedding) > $4
+            ORDER BY similarity DESC
+            LIMIT 500
+            """,
+            user_uuid,
+            bank_uuid,
+            since,
+            _DUPLICATE_SIMILARITY_THRESHOLD,
+        )
+    else:
+        # First run: full pairwise check (LIMIT 500 prevents runaway)
+        rows = await conn.fetch(
+            """
+            SELECT
+                a.id AS id_a,
+                b.id AS id_b,
+                a.importance_score AS score_a,
+                b.importance_score AS score_b,
+                1 - (a.embedding <=> b.embedding) AS similarity
+            FROM memories a
+            JOIN memories b
+              ON a.user_id = b.user_id
+             AND a.bank_id = b.bank_id
+             AND a.id < b.id
+            WHERE a.user_id = $1::uuid
+              AND a.bank_id = $2::uuid
+              AND a.archived_at IS NULL
+              AND b.archived_at IS NULL
+              AND a.embedding IS NOT NULL
+              AND b.embedding IS NOT NULL
+              AND 1 - (a.embedding <=> b.embedding) > $3
+            ORDER BY similarity DESC
+            LIMIT 500
+            """,
+            user_uuid,
+            bank_uuid,
+            _DUPLICATE_SIMILARITY_THRESHOLD,
+        )
 
     if not rows:
         return 0
@@ -194,16 +236,24 @@ async def _phase_conflict_resolution(
     conn,
     user_uuid: uuid.UUID,
     bank_uuid: uuid.UUID,
+    since: datetime | None = None,
 ) -> int:
     """Resolve ambiguous memory pairs using LLM classification.
 
+    When since is provided, only checks NEW memories against the vault.
     Targets pairs with cosine similarity 0.80-0.90 AND same memory_type.
     The LLM classifies each pair as UPDATE (newer wins) or KEEP_BOTH.
 
     Returns the number of conflicts resolved (archived).
     """
+    since_filter = ""
+    params: list = [user_uuid, bank_uuid, _CONFLICT_SIMILARITY_LOW, _CONFLICT_SIMILARITY_HIGH]
+    if since:
+        since_filter = "AND a.created_at > $5"
+        params.append(since)
+
     rows = await conn.fetch(
-        """
+        f"""
         SELECT
             a.id AS id_a, a.content AS content_a, a.created_at AS created_a,
             a.importance_score AS score_a, a.memory_type AS type_a,
@@ -214,7 +264,7 @@ async def _phase_conflict_resolution(
         JOIN memories b
           ON a.user_id = b.user_id
          AND a.bank_id = b.bank_id
-         AND a.id < b.id
+         AND a.id != b.id
         WHERE a.user_id = $1::uuid
           AND a.bank_id = $2::uuid
           AND a.archived_at IS NULL
@@ -224,13 +274,11 @@ async def _phase_conflict_resolution(
           AND a.memory_type = b.memory_type
           AND 1 - (a.embedding <=> b.embedding) > $3
           AND 1 - (a.embedding <=> b.embedding) <= $4
+          {since_filter}
         ORDER BY similarity DESC
         LIMIT 100
         """,
-        user_uuid,
-        bank_uuid,
-        _CONFLICT_SIMILARITY_LOW,
-        _CONFLICT_SIMILARITY_HIGH,
+        *params,
     )
 
     if not rows:
@@ -665,31 +713,38 @@ async def consolidate_user(user_id: str, bank_id: str) -> dict:
 
     try:
         async with pool.acquire() as conn:
-            # Phase 1: Importance Scoring (pure SQL)
+            # Fetch last_consolidation_at to scope phases to recent changes only
+            row = await conn.fetchrow(
+                "SELECT last_consolidation_at FROM profiles WHERE id = $1::uuid",
+                user_uuid,
+            )
+            since = row["last_consolidation_at"] if row and row["last_consolidation_at"] else None
+
+            # Phase 1: Importance Scoring — only rescore memories touched since last run
             logger.info("Phase 1: Scoring memories for user=%s bank=%s", user_id, bank_id)
-            summary["scores_updated"] = await _phase_importance_scoring(conn, user_uuid, bank_uuid)
+            summary["scores_updated"] = await _phase_importance_scoring(
+                conn, user_uuid, bank_uuid, since=since
+            )
 
-            # Phase 2: Near-Duplicate Merge (SQL + embeddings)
+            # Phase 2: Near-Duplicate Merge — only check new memories against vault
             logger.info("Phase 2: Deduplicating for user=%s bank=%s", user_id, bank_id)
-            summary["duplicates_merged"] = await _phase_duplicate_merge(conn, user_uuid, bank_uuid)
+            summary["duplicates_merged"] = await _phase_duplicate_merge(
+                conn, user_uuid, bank_uuid, since=since
+            )
 
-            # Phase 3: Conflict Resolution (LLM)
+            # Phase 3: Conflict Resolution — only check new memories for conflicts
             logger.info("Phase 3: Resolving conflicts for user=%s bank=%s", user_id, bank_id)
             summary["conflicts_resolved"] = await _phase_conflict_resolution(
-                conn,
-                user_uuid,
-                bank_uuid,
+                conn, user_uuid, bank_uuid, since=since
             )
 
-            # Phase 4: Entity Extraction (LLM)
+            # Phase 4: Entity Extraction — already incremental (unprocessed only)
             logger.info("Phase 4: Extracting entities for user=%s bank=%s", user_id, bank_id)
             summary["entities_extracted"] = await _phase_entity_extraction(
-                conn,
-                user_uuid,
-                bank_uuid,
+                conn, user_uuid, bank_uuid
             )
 
-            # Phase 5: Archive Stale (pure SQL)
+            # Phase 5: Archive Stale — full vault scan (intentional, needs global view)
             logger.info("Phase 5: Archiving stale memories for user=%s bank=%s", user_id, bank_id)
             summary["stale_archived"] = await _phase_archive_stale(conn, user_uuid, bank_uuid)
 
