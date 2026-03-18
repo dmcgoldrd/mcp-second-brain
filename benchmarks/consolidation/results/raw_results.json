@@ -1,0 +1,666 @@
+{
+  "timestamp": "2026-03-18T01:53:12.206494+00:00",
+  "total_pairs": 70,
+  "total_elapsed_ms": 6855.57620995678,
+  "strategies": {
+    "gpt4o-mini": {
+      "accuracy": 0.9285714285714286,
+      "precision": 1.0,
+      "recall": 0.8863636363636364,
+      "f1": 0.9397590361445783,
+      "confusion_matrix": {
+        "true_positive": 39,
+        "false_positive": 0,
+        "true_negative": 26,
+        "false_negative": 5
+      },
+      "avg_latency_ms": 475.27173653694,
+      "p50_latency_ms": 410.7770480331965,
+      "p95_latency_ms": 833.997177198762,
+      "total_cost": 0.0016798500000000005,
+      "cost_per_call": 2.399785714285715e-05,
+      "total_input_tokens": 10671,
+      "total_output_tokens": 132,
+      "errors": 0,
+      "by_category": {
+        "additive": 1.0,
+        "edge_case": 0.9,
+        "fact_update": 0.8,
+        "near_dup": 1.0,
+        "temporal": 1.0
+      },
+      "pair_results": [
+        {
+          "pair_id": "fact-update-01",
+          "category": "fact_update",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 567.3796320334077,
+          "cost": 2.3100000000000002e-05
+        },
+        {
+          "pair_id": "fact-update-02",
+          "category": "fact_update",
+          "expected": "UPDATE",
+          "predicted": "KEEP_BOTH",
+          "correct": false,
+          "latency_ms": 556.5009230049327,
+          "cost": 2.43e-05
+        },
+        {
+          "pair_id": "fact-update-03",
+          "category": "fact_update",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 1056.1665290151723,
+          "cost": 2.2800000000000002e-05
+        },
+        {
+          "pair_id": "fact-update-04",
+          "category": "fact_update",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 599.7358740423806,
+          "cost": 2.2800000000000002e-05
+        },
+        {
+          "pair_id": "fact-update-05",
+          "category": "fact_update",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 619.2233440233395,
+          "cost": 2.355e-05
+        },
+        {
+          "pair_id": "fact-update-06",
+          "category": "fact_update",
+          "expected": "UPDATE",
+          "predicted": "KEEP_BOTH",
+          "correct": false,
+          "latency_ms": 572.0607589464635,
+          "cost": 2.475e-05
+        },
+        {
+          "pair_id": "fact-update-07",
+          "category": "fact_update",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 731.2086700112559,
+          "cost": 2.295e-05
+        },
+        {
+          "pair_id": "fact-update-08",
+          "category": "fact_update",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 266.72479702392593,
+          "cost": 2.355e-05
+        },
+        {
+          "pair_id": "fact-update-09",
+          "category": "fact_update",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 285.8477010158822,
+          "cost": 2.3100000000000002e-05
+        },
+        {
+          "pair_id": "fact-update-10",
+          "category": "fact_update",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 406.875513959676,
+          "cost": 2.37e-05
+        },
+        {
+          "pair_id": "fact-update-11",
+          "category": "fact_update",
+          "expected": "UPDATE",
+          "predicted": "KEEP_BOTH",
+          "correct": false,
+          "latency_ms": 390.8499820390716,
+          "cost": 2.43e-05
+        },
+        {
+          "pair_id": "fact-update-12",
+          "category": "fact_update",
+          "expected": "UPDATE",
+          "predicted": "KEEP_BOTH",
+          "correct": false,
+          "latency_ms": 394.7710560169071,
+          "cost": 2.46e-05
+        },
+        {
+          "pair_id": "fact-update-13",
+          "category": "fact_update",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 428.51453501498327,
+          "cost": 2.265e-05
+        },
+        {
+          "pair_id": "fact-update-14",
+          "category": "fact_update",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 323.03648797096685,
+          "cost": 2.295e-05
+        },
+        {
+          "pair_id": "fact-update-15",
+          "category": "fact_update",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 598.908259999007,
+          "cost": 2.3400000000000003e-05
+        },
+        {
+          "pair_id": "fact-update-16",
+          "category": "fact_update",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 361.5643810480833,
+          "cost": 2.37e-05
+        },
+        {
+          "pair_id": "fact-update-17",
+          "category": "fact_update",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 310.8987290179357,
+          "cost": 2.3400000000000003e-05
+        },
+        {
+          "pair_id": "fact-update-18",
+          "category": "fact_update",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 349.5100020081736,
+          "cost": 2.355e-05
+        },
+        {
+          "pair_id": "fact-update-19",
+          "category": "fact_update",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 496.22901901602745,
+          "cost": 2.4e-05
+        },
+        {
+          "pair_id": "fact-update-20",
+          "category": "fact_update",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 453.2611059839837,
+          "cost": 2.3400000000000003e-05
+        },
+        {
+          "pair_id": "additive-01",
+          "category": "additive",
+          "expected": "KEEP_BOTH",
+          "predicted": "KEEP_BOTH",
+          "correct": true,
+          "latency_ms": 293.62205002689734,
+          "cost": 2.43e-05
+        },
+        {
+          "pair_id": "additive-02",
+          "category": "additive",
+          "expected": "KEEP_BOTH",
+          "predicted": "KEEP_BOTH",
+          "correct": true,
+          "latency_ms": 401.3942049932666,
+          "cost": 2.46e-05
+        },
+        {
+          "pair_id": "additive-03",
+          "category": "additive",
+          "expected": "KEEP_BOTH",
+          "predicted": "KEEP_BOTH",
+          "correct": true,
+          "latency_ms": 453.77955201547593,
+          "cost": 2.4449999999999998e-05
+        },
+        {
+          "pair_id": "additive-04",
+          "category": "additive",
+          "expected": "KEEP_BOTH",
+          "predicted": "KEEP_BOTH",
+          "correct": true,
+          "latency_ms": 1180.865969043225,
+          "cost": 2.4e-05
+        },
+        {
+          "pair_id": "additive-05",
+          "category": "additive",
+          "expected": "KEEP_BOTH",
+          "predicted": "KEEP_BOTH",
+          "correct": true,
+          "latency_ms": 457.38338795490563,
+          "cost": 2.46e-05
+        },
+        {
+          "pair_id": "additive-06",
+          "category": "additive",
+          "expected": "KEEP_BOTH",
+          "predicted": "KEEP_BOTH",
+          "correct": true,
+          "latency_ms": 1423.5282790032215,
+          "cost": 2.46e-05
+        },
+        {
+          "pair_id": "additive-07",
+          "category": "additive",
+          "expected": "KEEP_BOTH",
+          "predicted": "KEEP_BOTH",
+          "correct": true,
+          "latency_ms": 414.32894504396245,
+          "cost": 2.43e-05
+        },
+        {
+          "pair_id": "additive-08",
+          "category": "additive",
+          "expected": "KEEP_BOTH",
+          "predicted": "KEEP_BOTH",
+          "correct": true,
+          "latency_ms": 396.045433008112,
+          "cost": 2.43e-05
+        },
+        {
+          "pair_id": "additive-09",
+          "category": "additive",
+          "expected": "KEEP_BOTH",
+          "predicted": "KEEP_BOTH",
+          "correct": true,
+          "latency_ms": 809.2557989875786,
+          "cost": 2.4449999999999998e-05
+        },
+        {
+          "pair_id": "additive-10",
+          "category": "additive",
+          "expected": "KEEP_BOTH",
+          "predicted": "KEEP_BOTH",
+          "correct": true,
+          "latency_ms": 421.1196030373685,
+          "cost": 2.4449999999999998e-05
+        },
+        {
+          "pair_id": "additive-11",
+          "category": "additive",
+          "expected": "KEEP_BOTH",
+          "predicted": "KEEP_BOTH",
+          "correct": true,
+          "latency_ms": 754.3702669790946,
+          "cost": 2.46e-05
+        },
+        {
+          "pair_id": "additive-12",
+          "category": "additive",
+          "expected": "KEEP_BOTH",
+          "predicted": "KEEP_BOTH",
+          "correct": true,
+          "latency_ms": 383.7700880249031,
+          "cost": 2.4449999999999998e-05
+        },
+        {
+          "pair_id": "additive-13",
+          "category": "additive",
+          "expected": "KEEP_BOTH",
+          "predicted": "KEEP_BOTH",
+          "correct": true,
+          "latency_ms": 363.92746103229,
+          "cost": 2.49e-05
+        },
+        {
+          "pair_id": "additive-14",
+          "category": "additive",
+          "expected": "KEEP_BOTH",
+          "predicted": "KEEP_BOTH",
+          "correct": true,
+          "latency_ms": 265.9359160461463,
+          "cost": 2.505e-05
+        },
+        {
+          "pair_id": "additive-15",
+          "category": "additive",
+          "expected": "KEEP_BOTH",
+          "predicted": "KEEP_BOTH",
+          "correct": true,
+          "latency_ms": 200.14312298735604,
+          "cost": 2.4449999999999998e-05
+        },
+        {
+          "pair_id": "additive-16",
+          "category": "additive",
+          "expected": "KEEP_BOTH",
+          "predicted": "KEEP_BOTH",
+          "correct": true,
+          "latency_ms": 202.85125798545778,
+          "cost": 2.505e-05
+        },
+        {
+          "pair_id": "additive-17",
+          "category": "additive",
+          "expected": "KEEP_BOTH",
+          "predicted": "KEEP_BOTH",
+          "correct": true,
+          "latency_ms": 223.38110802229494,
+          "cost": 2.4149999999999997e-05
+        },
+        {
+          "pair_id": "additive-18",
+          "category": "additive",
+          "expected": "KEEP_BOTH",
+          "predicted": "KEEP_BOTH",
+          "correct": true,
+          "latency_ms": 483.18154900334775,
+          "cost": 2.43e-05
+        },
+        {
+          "pair_id": "additive-19",
+          "category": "additive",
+          "expected": "KEEP_BOTH",
+          "predicted": "KEEP_BOTH",
+          "correct": true,
+          "latency_ms": 444.4711260148324,
+          "cost": 2.475e-05
+        },
+        {
+          "pair_id": "additive-20",
+          "category": "additive",
+          "expected": "KEEP_BOTH",
+          "predicted": "KEEP_BOTH",
+          "correct": true,
+          "latency_ms": 629.6949759707786,
+          "cost": 2.4149999999999997e-05
+        },
+        {
+          "pair_id": "temporal-01",
+          "category": "temporal",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 360.79044901998714,
+          "cost": 2.46e-05
+        },
+        {
+          "pair_id": "temporal-02",
+          "category": "temporal",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 424.39811100484803,
+          "cost": 2.295e-05
+        },
+        {
+          "pair_id": "temporal-03",
+          "category": "temporal",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 416.7459420277737,
+          "cost": 2.355e-05
+        },
+        {
+          "pair_id": "temporal-04",
+          "category": "temporal",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 407.2251510224305,
+          "cost": 2.43e-05
+        },
+        {
+          "pair_id": "temporal-05",
+          "category": "temporal",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 725.4001729888842,
+          "cost": 2.43e-05
+        },
+        {
+          "pair_id": "temporal-06",
+          "category": "temporal",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 403.3060669898987,
+          "cost": 2.325e-05
+        },
+        {
+          "pair_id": "temporal-07",
+          "category": "temporal",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 371.0690150037408,
+          "cost": 2.505e-05
+        },
+        {
+          "pair_id": "temporal-08",
+          "category": "temporal",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 399.1861949907616,
+          "cost": 2.37e-05
+        },
+        {
+          "pair_id": "temporal-09",
+          "category": "temporal",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 313.7426530010998,
+          "cost": 2.4449999999999998e-05
+        },
+        {
+          "pair_id": "temporal-10",
+          "category": "temporal",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 302.8244739980437,
+          "cost": 2.4e-05
+        },
+        {
+          "pair_id": "near-dup-01",
+          "category": "near_dup",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 854.2401230079122,
+          "cost": 2.3400000000000003e-05
+        },
+        {
+          "pair_id": "near-dup-02",
+          "category": "near_dup",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 293.34017098881304,
+          "cost": 2.37e-05
+        },
+        {
+          "pair_id": "near-dup-03",
+          "category": "near_dup",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 402.3781350115314,
+          "cost": 2.37e-05
+        },
+        {
+          "pair_id": "near-dup-04",
+          "category": "near_dup",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 789.8977079894394,
+          "cost": 2.355e-05
+        },
+        {
+          "pair_id": "near-dup-05",
+          "category": "near_dup",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 387.16319599188864,
+          "cost": 2.4e-05
+        },
+        {
+          "pair_id": "near-dup-06",
+          "category": "near_dup",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 443.566695030313,
+          "cost": 2.3400000000000003e-05
+        },
+        {
+          "pair_id": "near-dup-07",
+          "category": "near_dup",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 418.63039502641186,
+          "cost": 2.37e-05
+        },
+        {
+          "pair_id": "near-dup-08",
+          "category": "near_dup",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 501.99775502551347,
+          "cost": 2.295e-05
+        },
+        {
+          "pair_id": "near-dup-09",
+          "category": "near_dup",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 346.3597529917024,
+          "cost": 2.2499999999999998e-05
+        },
+        {
+          "pair_id": "near-dup-10",
+          "category": "near_dup",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 538.2872709888034,
+          "cost": 2.415e-05
+        },
+        {
+          "pair_id": "edge-01",
+          "category": "edge_case",
+          "expected": "KEEP_BOTH",
+          "predicted": "KEEP_BOTH",
+          "correct": true,
+          "latency_ms": 468.945631000679,
+          "cost": 2.43e-05
+        },
+        {
+          "pair_id": "edge-02",
+          "category": "edge_case",
+          "expected": "KEEP_BOTH",
+          "predicted": "KEEP_BOTH",
+          "correct": true,
+          "latency_ms": 564.8009959841147,
+          "cost": 2.4e-05
+        },
+        {
+          "pair_id": "edge-03",
+          "category": "edge_case",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 664.3566359998658,
+          "cost": 2.37e-05
+        },
+        {
+          "pair_id": "edge-04",
+          "category": "edge_case",
+          "expected": "KEEP_BOTH",
+          "predicted": "KEEP_BOTH",
+          "correct": true,
+          "latency_ms": 268.3936220128089,
+          "cost": 2.535e-05
+        },
+        {
+          "pair_id": "edge-05",
+          "category": "edge_case",
+          "expected": "UPDATE",
+          "predicted": "KEEP_BOTH",
+          "correct": false,
+          "latency_ms": 429.4974350486882,
+          "cost": 2.475e-05
+        },
+        {
+          "pair_id": "edge-06",
+          "category": "edge_case",
+          "expected": "KEEP_BOTH",
+          "predicted": "KEEP_BOTH",
+          "correct": true,
+          "latency_ms": 266.0535929608159,
+          "cost": 2.475e-05
+        },
+        {
+          "pair_id": "edge-07",
+          "category": "edge_case",
+          "expected": "KEEP_BOTH",
+          "predicted": "KEEP_BOTH",
+          "correct": true,
+          "latency_ms": 385.359492036514,
+          "cost": 2.43e-05
+        },
+        {
+          "pair_id": "edge-08",
+          "category": "edge_case",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 403.12848798930645,
+          "cost": 2.37e-05
+        },
+        {
+          "pair_id": "edge-09",
+          "category": "edge_case",
+          "expected": "KEEP_BOTH",
+          "predicted": "KEEP_BOTH",
+          "correct": true,
+          "latency_ms": 393.9628230291419,
+          "cost": 2.505e-05
+        },
+        {
+          "pair_id": "edge-10",
+          "category": "edge_case",
+          "expected": "UPDATE",
+          "predicted": "UPDATE",
+          "correct": true,
+          "latency_ms": 351.65601305197924,
+          "cost": 2.43e-05
+        }
+      ]
+    }
+  }
+}
