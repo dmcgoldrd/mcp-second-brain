@@ -39,3 +39,9 @@ frontend/dist/
 # Benchmarks
 benchmarks/data/*.json
 benchmarks/results/
+
+# Agent scratch + machine-local state — not project content.
+.claude/
+.omc/
+MEMORY/
+.mcp.json
